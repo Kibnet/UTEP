@@ -1,0 +1,49 @@
+using UTEP.Cli.Domain;
+using UTEP.Cli.Services;
+using TaskStatus = UTEP.Cli.Domain.TaskStatus;
+
+namespace UTEP.Tests;
+
+public static class TestData
+{
+    public static TaskInfo CreateTask(
+        string id,
+        TaskStatus status,
+        string? parentId = null,
+        IEnumerable<string>? blockedBy = null)
+    {
+        var task = new TaskFile
+        {
+            Version = 1,
+            Task = new TaskData
+            {
+                Id = id,
+                GoalId = "G-2026-001",
+                ParentId = parentId,
+                Title = $"Task {id}",
+                Status = status,
+                Priority = 2,
+                Dependencies = new TaskDependencies
+                {
+                    BlockedBy = blockedBy?.ToList() ?? new List<string>()
+                }
+            },
+            Links = new TaskLinks()
+        };
+
+        return new TaskInfo(task, $"goals/G-2026-001/tasks/{id}.task.json");
+    }
+
+    public static TaskSnapshot CreateSnapshot(params TaskInfo[] tasks)
+    {
+        var goal = new GoalFile
+        {
+            Version = 1,
+            Goal = new GoalData { Id = "G-2026-001", Title = "Test" },
+            Meta = new GoalMeta()
+        };
+
+        var map = tasks.ToDictionary(info => info.File.Task.Id, info => info);
+        return new TaskSnapshot(goal, map);
+    }
+}

@@ -1,4 +1,4 @@
-# Unlimotion Task Execution Protocol (UTEP) v1.0
+﻿# Unlimotion Task Execution Protocol (UTEP) v1.1
 
 ---
 
@@ -16,24 +16,65 @@ UTEP **не является таск-менеджером**.
 
 ---
 
-## 2. Базовые принципы
+## 2. Главные принципы (v1.1)
 
-1. **Единый источник истины** — JSON-файлы (`goal.json`, `*.task.json`)
-2. **CLI — единственный исполнитель правил**
-3. **Агент и человек не редактируют файлы напрямую**
-4. **Перед выполнением любой задачи проверяется актуальность**
-5. **`next` возвращает только выполнимые задачи**
-6. **Любая ошибка валидации должна иметь путь разрешения**
-7. **Дерево задач — для смысла, зависимости — для порядка**
-8. **View (`index.md`) генерируется, а не редактируется**
+1. **Истина в JSON-файлах** (`goal.json`, `*.task.json`, `utep.log.ndjson`).
+2. **CLI — единственный исполнитель правил.**
+3. **Агент и человек не редактируют файлы напрямую.**
+4. **`next` возвращает только выполнимое сейчас (Actionable).**
+5. **Любая ошибка валидации должна иметь путь разрешения** (`doctor`).
+6. **Дерево задач — для смысла, зависимости — для порядка.**
+7. **View (`index.md`) генерируется CLI.**
+8. **Degraded mode:** `next`/`render` работают даже при частичной невалидности.
 
 ---
 
-## 3. Модель данных
+## 3. Структура репозитория
 
-### 3.1 Цель (Goal)
+```
+/utep/
+  utep.config.json
+  /.utep/
+    context.json
+  /goals/
+    G-2026-001/
+      goal.json
+      index.md
+      /tasks/
+        T-001.task.json
+      /logs/
+        utep.log.ndjson
+      /artifacts/
+```
 
-Файл: `goals/<goal_id>/goal.json`
+---
+
+## 4. Модель данных (v1.1)
+
+### 4.1 utep.config.json
+
+```json
+{
+  "version": 1,
+  "limits": {
+    "attempt_limit": 3,
+    "time_limit_minutes": 90,
+    "large_task_minutes": 240
+  },
+  "thresholds": {
+    "confidence_min": 0.7
+  },
+  "render": {
+    "index": true,
+    "index_filename": "index.md"
+  },
+  "output": {
+    "default": "human"
+  }
+}
+```
+
+### 4.2 goal.json
 
 ```json
 {
@@ -42,21 +83,19 @@ UTEP **не является таск-менеджером**.
     "id": "G-2026-001",
     "title": "Сделать UTEP CLI",
     "status": "Planned",
-    "success_criteria": [
-      "CLI реализован",
-      "Агент может работать автономно"
-    ],
+    "success_criteria": ["..."],
     "created_at": "...",
-    "updated_at": "..."
+    "updated_at": "...",
+    "next_task_id": null
+  },
+  "meta": {
+    "owner": "human",
+    "tags": ["utep"]
   }
 }
 ```
 
----
-
-### 3.2 Задача (Task)
-
-Файл: `goals/<goal_id>/tasks/<task_id>.task.json`
+### 4.3 task.json
 
 ```json
 {
@@ -67,34 +106,47 @@ UTEP **не является таск-менеджером**.
     "parent_id": "T-002",
     "title": "Настроить CI",
     "status": "Ready",
-
     "priority": 2,
     "risk": "Med",
     "cost_estimate_minutes": 60,
-
-    "success_criteria": [
-      "Pipeline запускается",
-      "Тесты выполняются"
-    ],
-
+    "success_criteria": ["..."],
     "confidence": 0.8,
-
-    "dependencies": {
-      "blocked_by": ["T-005"]
-    },
-
+    "dependencies": { "blocked_by": ["T-005"] },
     "assumptions": [],
     "open_questions": [],
     "attempts": 0,
     "time_spent_minutes": 0,
     "evidence": []
-  }
+  },
+  "links": { "artifacts_dir": "../artifacts/" }
 }
+```
+
+### 4.4 open_questions[]
+
+```json
+{
+  "id": "Q-01",
+  "kind": "architectural",
+  "question": "...",
+  "options": [{"id":"O-1","title":"...","pros":[],"cons":[],"risks":[]}],
+  "recommendation": "O-2",
+  "requested_answer": "...",
+  "created_at": "..."
+}
+```
+
+### 4.5 utep.log.ndjson
+
+Каждая строка — JSON-событие.
+
+```json
+{"at":"2026-01-15T01:12:00-05:00","actor":"cli","event":"task.status_changed","goal_id":"G-2026-001","task_id":"T-010","from":"Planned","to":"Ready","note":"manual"}
 ```
 
 ---
 
-### 3.3 Статусы задач
+## 5. Статусы задач
 
 ```
 Draft
@@ -107,20 +159,11 @@ Cancelled
 Invalidated
 ```
 
-**Терминальные:**
-`Completed`, `Cancelled`, `Invalidated`
+**Терминальные:** `Completed`, `Cancelled`, `Invalidated`.
 
 ---
 
-## 4. Зависимости и параллельность
-
-* `blocked_by` — список задач, которые **должны стать терминальными**
-* Если блокер завершён **не Completed**, зависимая задача помечается:
-  * `needs_review = true` (вычисляемо)
-
----
-
-## 5. Вычисляемые состояния (не хранятся)
+## 6. Вычисляемые состояния (не хранятся)
 
 CLI вычисляет:
 
@@ -134,22 +177,22 @@ CLI вычисляет:
 
 ---
 
-## 6. Алгоритм выбора задач (`next`)
+## 7. Алгоритм выбора задач (`next`)
 
-### Кандидаты:
+**Кандидаты:**
 
 * `status == Ready`
-* не терминальные
 * зависимости сняты
+* не терминальные
 
-### Сортировка:
+**Сортировка:**
 
-1. глубина в дереве (ближе к корню)
-2. сколько задач разблокирует (`blocks_count`)
-3. priority
-4. created_at
+1. depth ↑
+2. blocks_count ↓
+3. priority ↑
+4. created_at ↑ (если есть) / стабильный tie‑break
 
-### Если кандидатов нет:
+**Если кандидатов нет:**
 
 * `WaitingUser` → вернуть вопрос пользователю
 * `WaitingDependencies` → вернуть главный блокер
@@ -157,55 +200,83 @@ CLI вычисляет:
 
 ---
 
-## 7. Валидация и восстановление
+## 8. JSON‑envelope для всех команд (`--json`)
+
+```json
+{
+  "utep_version": "1.1",
+  "command": "utep next",
+  "repo_root": "/abs/path",
+  "goal_id": "G-2026-001",
+  "ok": true,
+  "result": { ... },
+  "warnings": [],
+  "errors": [],
+  "meta": {
+    "timestamp": "2026-01-15T01:30:00-05:00",
+    "duration_ms": 37
+  }
+}
+```
+
+Ошибки и предупреждения используют `ValidationIssue` из `UTEP-SCHEMA.md`.
+
+---
+
+## 9. Команды CLI (v1.1)
+
+* `utep init`
+* `utep goal new|open|status|tree`
+* `utep task new|show|set-status|start|attempt|complete|invalidate|cancel|block`
+* `utep task dep add|rm`
+* `utep task deps`
+* `utep next`
+* `utep bottlenecks`
+* `utep validate`
+* `utep doctor [--fix]`
+* `utep render`
+
+Все JSON‑форматы команд соответствуют `UTEP-SCHEMA.md`.
+
+---
+
+## 10. Валидация и восстановление
 
 ### `utep validate`
 
 * только диагностика
-* **никогда не блокирует просмотр/next**
+* exit code `2`, если есть ошибки
 
 ### `utep doctor`
 
 * объясняет проблему
-* предлагает исправления
-* умеет чинить автоматически (`--fix`)
-* поддерживает **degraded mode**
+* предлагает remedies
+* может исправлять автоматически (`--fix`)
+
+**Минимальные ошибки:** E001–E005 (см. `UTEP-SCHEMA.md`).
 
 ---
 
-## 8. Инварианты системы
-
-1. Нет циклов в `parent_id`
-2. Нет циклов в зависимостях
-3. `Completed` всегда имеет evidence
-4. `Blocked` всегда имеет open_question
-5. Любая задача либо:
-
-   * выполняется,
-   * либо ждёт пользователя,
-   * либо ждёт зависимостей,
-   * либо терминальна
-
----
-
-## 9. View (index.md)
+## 11. View (index.md)
 
 * генерируется CLI
-* показывает:
-
-  * дерево задач
-  * статусы
-  * bottlenecks
-  * next action
-* **не содержит полей задач**
+* дерево задач + маркеры:
+  * `⛔ deps: ...`
+  * `⚠ review`
+  * `🟥 Blocked`
+* отдельные секции `Bottlenecks` и `Waiting`
 
 ---
 
-## 10. Гарантии
+## 12. Гарантии
 
-* JSON пишется канонически
-* изменения атомарны
+* JSON пишется канонически (стабильные ключи, 2 пробела, \n в конце)
+* записи атомарные (temp + rename)
 * CLI не оставляет репозиторий в полусостоянии
 * агент не может нарушить правила протокола
 
 ---
+
+## 13. Источник истины
+
+Детальная спецификация форматов и ответов находится в `UTEP-SCHEMA.md`.
