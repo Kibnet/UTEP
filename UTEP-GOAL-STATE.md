@@ -1,4 +1,4 @@
-# 🔁 Граф состояний цели (UTEP Goal FSM)
+﻿# 🔁 Граф состояний цели (UTEP Goal FSM)
 
 ```mermaid
 stateDiagram-v2
@@ -9,24 +9,24 @@ stateDiagram-v2
     Draft --> Cancelled : отказ от цели
 
     Planned --> Ready : есть путь к первому действию
-    Planned --> Blocked : не хватает решения/данных
+    Planned --> Question : не хватает решения/данных
     Planned --> Invalidated : цель потеряла смысл
     Planned --> Cancelled : отказ от цели
 
     Ready --> InProgress : начато выполнение задач
-    Ready --> Blocked : упёрлись в вопрос/ресурс
+    Ready --> Question : упёрлись в вопрос/ресурс
     Ready --> Invalidated : контекст изменился
     Ready --> Cancelled : отказ от цели
 
     InProgress --> Completed : критерии цели выполнены
-    InProgress --> Blocked : нет actionable, нужен человек
+    InProgress --> Question : нет actionable, нужен человек
     InProgress --> Invalidated : цель потеряла смысл
     InProgress --> Cancelled : отказ от цели
 
-    Blocked --> Planned : ответ/данные получены, перепланирование
-    Blocked --> Ready : снова есть actionable
-    Blocked --> Invalidated : цель потеряла смысл
-    Blocked --> Cancelled : отказ от цели
+    Question --> Planned : ответ/данные получены, перепланирование
+    Question --> Ready : снова есть actionable
+    Question --> Invalidated : цель потеряла смысл
+    Question --> Cancelled : отказ от цели
 
     Completed --> [*]
     Cancelled --> [*]
@@ -39,7 +39,7 @@ stateDiagram-v2
 * **Planned** — цель принята, но путь может быть ещё не готов.
 * **Ready** — существует хотя бы одно осмысленное действие (`Actionable` задача).
 * **InProgress** — выполнение идёт (есть/были действия, ведётся работа).
-* **Blocked** — цель упёрлась в внешнее решение/ограничение (обычно вопрос пользователю).
+* **Question** — цель упёрлась в внешнее решение/ограничение (обычно вопрос пользователю).
 * **Completed** — критерии цели выполнены.
 * **Cancelled** — цель отвергнута решением человека.
 * **Invalidated** — цель утратила смысл (реальность изменилась).
@@ -101,7 +101,7 @@ stateDiagram-v2
 * отмена: `utep task cancel <id> --reason "..."`
 * перевод в planned: `utep task set-status <id> Planned --note "..."`
 
-> На практике агент редко трогает Draft, его зона начинается с Ready/Blocked.
+> На практике агент редко трогает Draft, его зона начинается с Ready/Question.
 
 ---
 
@@ -130,7 +130,7 @@ stateDiagram-v2
 
 1. **Актуальность**: задача всё ещё ведёт к цели?
 2. **Actionable**: нет ожидания зависимостей (`waiting_dependencies` пусто)
-3. **Не заблокирована пользователем**: статус не Blocked
+3. **Не заблокирована пользователем**: статус не Question
 4. **Стабильность контекста**: входные данные не поменялись
 
 **Команды:**
@@ -167,7 +167,7 @@ CLI должен:
 
 ---
 
-### 2.5 Ready/InProgress → Blocked (block)
+### 2.5 Ready/InProgress → Question (block)
 
 **Когда:** без внешней информации/решения двигаться нельзя.
 
@@ -224,9 +224,9 @@ CLI должен:
 
 Это критично, потому что именно здесь многие агенты “ломаются”.
 
-### Сценарий A: WaitingUser
+### Сценарий A: Question
 
-**Симптом:** `utep next` exit code 5 и `blocking.kind == "user"`
+**Симптом:** `utep next` exit code 5 и `blocking.kind == "question"`
 
 **Действие:**
 
@@ -240,9 +240,9 @@ CLI должен:
 
 ---
 
-### Сценарий B: WaitingDependencies
+### Сценарий B: Blocked
 
-**Симптом:** `blocking.kind == "dependencies"`
+**Симптом:** `blocking.kind == "blocked"`
 
 **Действие:**
 
@@ -286,9 +286,9 @@ CLI должен:
 
 * агент начал и выполняет задачи, есть evidence/attempts
 
-### Goal = Blocked
+### Goal = Question
 
-* `utep next` возвращает `WaitingUser` и нет другого пути
+* `utep next` возвращает `Question` и нет другого пути
 
 ### Goal = Completed
 

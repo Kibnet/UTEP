@@ -11,7 +11,7 @@ public sealed class TaskComputed
     public bool IsUnblocked { get; set; }
 
     [JsonPropertyOrder(3)]
-    public List<string> WaitingDependencies { get; set; } = new();
+    public List<string> BlockedBy { get; set; } = new();
 
     [JsonPropertyOrder(4)]
     public bool NeedsReview { get; set; }

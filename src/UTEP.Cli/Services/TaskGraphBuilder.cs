@@ -32,7 +32,8 @@ public sealed class TaskGraphBuilder
         var counts = tasks.Keys.ToDictionary(id => id, _ => 0, StringComparer.OrdinalIgnoreCase);
         foreach (var (taskId, info) in tasks)
         {
-            foreach (var blocker in info.File.Task.Dependencies.BlockedBy)
+            var blockedBy = info.File.Task.Dependencies?.BlockedBy ?? new List<string>();
+            foreach (var blocker in blockedBy)
             {
                 if (counts.ContainsKey(blocker))
                 {

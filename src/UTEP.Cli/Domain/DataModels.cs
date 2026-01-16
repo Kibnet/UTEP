@@ -143,7 +143,7 @@ public sealed class TaskData
     public double Confidence { get; set; } = 0.5;
 
     [JsonPropertyOrder(11)]
-    public TaskDependencies Dependencies { get; set; } = new();
+    public TaskDependencies? Dependencies { get; set; }
 
     [JsonPropertyOrder(12)]
     public List<Assumption> Assumptions { get; set; } = new();
@@ -164,7 +164,7 @@ public sealed class TaskData
 public sealed class TaskDependencies
 {
     [JsonPropertyOrder(1)]
-    public List<string> BlockedBy { get; set; } = new();
+    public List<string>? BlockedBy { get; set; }
 }
 
 public sealed class Assumption
@@ -242,7 +242,7 @@ public enum TaskStatus
     Planned,
     Ready,
     InProgress,
-    Blocked,
+    Question,
     Completed,
     Cancelled,
     Invalidated
@@ -254,7 +254,7 @@ public enum GoalStatus
     Planned,
     Ready,
     InProgress,
-    Blocked,
+    Question,
     Completed,
     Cancelled,
     Invalidated

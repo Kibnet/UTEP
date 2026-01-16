@@ -7,7 +7,7 @@ public sealed class TaskComputedBuilder
 {
     public TaskComputed Build(TaskFile task, IReadOnlyDictionary<string, TaskInfo> tasks, Dictionary<string, int> blocksCount)
     {
-        var dependencies = task.Task.Dependencies.BlockedBy;
+        var dependencies = task.Task.Dependencies?.BlockedBy ?? new List<string>();
         var waiting = new List<string>();
         var needsReview = false;
 
@@ -41,7 +41,7 @@ public sealed class TaskComputedBuilder
         {
             EffectiveState = effectiveState,
             IsUnblocked = isUnblocked,
-            WaitingDependencies = waiting,
+            BlockedBy = waiting,
             NeedsReview = needsReview,
             BlocksCount = count
         };
@@ -51,8 +51,8 @@ public sealed class TaskComputedBuilder
     {
         return status switch
         {
-            TaskStatus.Ready => isUnblocked ? "Actionable" : "WaitingDependencies",
-            TaskStatus.Blocked => openQuestions > 0 ? "WaitingUser" : "WaitingUser",
+            TaskStatus.Ready => isUnblocked ? "Actionable" : "Blocked",
+            TaskStatus.Question => openQuestions > 0 ? "Question" : "Question",
             TaskStatus.Completed or TaskStatus.Cancelled or TaskStatus.Invalidated => "Terminal",
             TaskStatus.Draft or TaskStatus.Planned => "NotReady",
             _ => "NotReady"

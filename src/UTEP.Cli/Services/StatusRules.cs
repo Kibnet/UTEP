@@ -10,17 +10,17 @@ public static class StatusRules
         [TaskStatus.Draft] = new HashSet<TaskStatus> { TaskStatus.Planned, TaskStatus.Cancelled },
         [TaskStatus.Planned] = new HashSet<TaskStatus>
         {
-            TaskStatus.Ready, TaskStatus.Blocked, TaskStatus.Invalidated, TaskStatus.Cancelled
+            TaskStatus.Ready, TaskStatus.Question, TaskStatus.Invalidated, TaskStatus.Cancelled
         },
         [TaskStatus.Ready] = new HashSet<TaskStatus>
         {
-            TaskStatus.InProgress, TaskStatus.Blocked, TaskStatus.Invalidated, TaskStatus.Cancelled
+            TaskStatus.InProgress, TaskStatus.Question, TaskStatus.Invalidated, TaskStatus.Cancelled
         },
         [TaskStatus.InProgress] = new HashSet<TaskStatus>
         {
-            TaskStatus.Completed, TaskStatus.Blocked, TaskStatus.Invalidated, TaskStatus.Cancelled
+            TaskStatus.Completed, TaskStatus.Question, TaskStatus.Invalidated, TaskStatus.Cancelled
         },
-        [TaskStatus.Blocked] = new HashSet<TaskStatus>
+        [TaskStatus.Question] = new HashSet<TaskStatus>
         {
             TaskStatus.Planned, TaskStatus.Ready, TaskStatus.Invalidated, TaskStatus.Cancelled
         },

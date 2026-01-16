@@ -32,15 +32,39 @@ public class ValidationServiceTests
     }
 
     [Fact]
-    public void ShouldDetectBlockedWithoutQuestion()
+    public void ShouldDetectQuestionWithoutOpenQuestions()
     {
-        var task = TestData.CreateTask("T-001", TaskStatus.Blocked);
+        var task = TestData.CreateTask("T-001", TaskStatus.Question);
         var snapshot = TestData.CreateSnapshot(task);
         var service = new ValidationService();
 
         var issues = service.Validate(snapshot, "c:/repo");
 
-        Assert.Contains(issues, issue => issue.Code == "E005");
+        Assert.Contains(issues, issue => issue.Code == "E008");
+    }
+
+    [Fact]
+    public void ShouldDetectMissingSuccessCriteriaForActionableStatuses()
+    {
+        var task = TestData.CreateTask("T-001", TaskStatus.Ready);
+        var snapshot = TestData.CreateSnapshot(task);
+        var service = new ValidationService();
+
+        var issues = service.Validate(snapshot, "c:/repo");
+
+        Assert.Contains(issues, issue => issue.Code == "E006");
+    }
+
+    [Fact]
+    public void ShouldDetectMissingBlockedByList()
+    {
+        var task = TestData.CreateTask("T-001", TaskStatus.Planned, includeDependencies: true, nullBlockedBy: true);
+        var snapshot = TestData.CreateSnapshot(task);
+        var service = new ValidationService();
+
+        var issues = service.Validate(snapshot, "c:/repo");
+
+        Assert.Contains(issues, issue => issue.Code == "E007");
     }
 
     [Fact]

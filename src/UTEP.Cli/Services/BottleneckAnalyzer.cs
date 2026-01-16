@@ -52,7 +52,8 @@ public sealed class BottleneckAnalyzer
         var blocked = new List<string>();
         foreach (var (candidateId, info) in tasks)
         {
-            if (info.File.Task.Dependencies.BlockedBy.Contains(taskId, StringComparer.OrdinalIgnoreCase))
+            var blockedBy = info.File.Task.Dependencies?.BlockedBy ?? new List<string>();
+            if (blockedBy.Contains(taskId, StringComparer.OrdinalIgnoreCase))
             {
                 blocked.Add(candidateId);
                 if (blocked.Count >= max)

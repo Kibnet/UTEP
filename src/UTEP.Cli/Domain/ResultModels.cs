@@ -374,7 +374,7 @@ public sealed class NextBlocking
     public string Kind { get; set; } = string.Empty;
 
     [JsonPropertyOrder(2)]
-    public BlockedTaskInfo? BlockedTask { get; set; }
+    public QuestionTaskInfo? QuestionTask { get; set; }
 
     [JsonPropertyOrder(3)]
     public OpenQuestionInfo? Question { get; set; }
@@ -383,10 +383,10 @@ public sealed class NextBlocking
     public RecommendedBlocker? RecommendedBlocker { get; set; }
 
     [JsonPropertyOrder(5)]
-    public List<WaitingExample> WaitingExamples { get; set; } = new();
+    public List<BlockedExample> BlockedExamples { get; set; } = new();
 }
 
-public sealed class BlockedTaskInfo
+public sealed class QuestionTaskInfo
 {
     [JsonPropertyOrder(1)]
     public TaskRef Task { get; set; } = new();
@@ -440,13 +440,13 @@ public sealed class RecommendedBlocker
     public int BlocksCount { get; set; }
 }
 
-public sealed class WaitingExample
+public sealed class BlockedExample
 {
     [JsonPropertyOrder(1)]
     public string TaskId { get; set; } = string.Empty;
 
     [JsonPropertyOrder(2)]
-    public List<string> WaitingOn { get; set; } = new();
+    public List<string> BlockedOn { get; set; } = new();
 }
 
 public sealed class BottlenecksResult

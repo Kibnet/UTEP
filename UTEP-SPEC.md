@@ -153,7 +153,7 @@ Draft
 Planned
 Ready
 InProgress
-Blocked
+Question
 Completed
 Cancelled
 Invalidated
@@ -170,8 +170,8 @@ CLI вычисляет:
 | Состояние           | Смысл                               |
 | ------------------- | ----------------------------------- |
 | Actionable          | Ready + зависимости сняты           |
-| WaitingDependencies | Ready, но ждёт блокеры              |
-| WaitingUser         | Blocked с вопросом                  |
+| Blocked | Ready, но ждёт блокеры              |
+| Question         | Question с вопросом                  |
 | NotReady            | Draft / Planned                     |
 | Terminal            | Completed / Cancelled / Invalidated |
 
@@ -194,8 +194,8 @@ CLI вычисляет:
 
 **Если кандидатов нет:**
 
-* `WaitingUser` → вернуть вопрос пользователю
-* `WaitingDependencies` → вернуть главный блокер
+* `Question` → вернуть вопрос пользователю
+* `Blocked` → вернуть главный блокер
 * exit code `5`
 
 ---
@@ -253,7 +253,7 @@ CLI вычисляет:
 * предлагает remedies
 * может исправлять автоматически (`--fix`)
 
-**Минимальные ошибки:** E001–E005 (см. `UTEP-SCHEMA.md`).
+**Минимальные ошибки:** E001–E009 (см. `UTEP-SCHEMA.md`).
 
 ---
 
@@ -263,8 +263,8 @@ CLI вычисляет:
 * дерево задач + маркеры:
   * `⛔ deps: ...`
   * `⚠ review`
-  * `🟥 Blocked`
-* отдельные секции `Bottlenecks` и `Waiting`
+  * `🟥 Question`
+* отдельные секции `Bottlenecks` и `Blocked`
 
 ---
 

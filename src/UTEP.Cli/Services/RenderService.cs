@@ -60,28 +60,28 @@ public sealed class RenderService
         }
 
         builder.AppendLine();
-        builder.AppendLine("## Waiting");
+        builder.AppendLine("## Blocked");
         builder.AppendLine();
 
-        var waitingExamples = tasks.Values
+        var blockedExamples = tasks.Values
             .Select(info => new
             {
                 info.File.Task.Id,
                 Computed = _computedBuilder.Build(info.File, tasks, blocksCount)
             })
-            .Where(item => item.Computed.EffectiveState == "WaitingDependencies")
+            .Where(item => item.Computed.EffectiveState == "Blocked")
             .Take(5)
             .ToList();
 
-        if (waitingExamples.Count == 0)
+        if (blockedExamples.Count == 0)
         {
-            builder.AppendLine("- Нет ожидающих задач.");
+            builder.AppendLine("- Нет заблокированных задач.");
         }
         else
         {
-            foreach (var item in waitingExamples)
+            foreach (var item in blockedExamples)
             {
-                builder.AppendLine($"- {item.Id} -> {string.Join(", ", item.Computed.WaitingDependencies)}");
+                builder.AppendLine($"- {item.Id} -> {string.Join(", ", item.Computed.BlockedBy)}");
             }
         }
 
@@ -125,9 +125,9 @@ public sealed class RenderService
 
     private static string BuildMarker(TaskComputed computed, TaskData task)
     {
-        if (computed.EffectiveState == "WaitingDependencies")
+        if (computed.EffectiveState == "Blocked")
         {
-            return $" ⛔ deps: {string.Join(",", computed.WaitingDependencies)}";
+            return $" ⛔ blocked: {string.Join(",", computed.BlockedBy)}";
         }
 
         if (computed.NeedsReview)
@@ -135,9 +135,9 @@ public sealed class RenderService
             return " ⚠ review";
         }
 
-        if (task.Status == TaskStatus.Blocked && task.OpenQuestions.Count > 0)
+        if (task.Status == TaskStatus.Question && task.OpenQuestions.Count > 0)
         {
-            return " 🟥 Blocked";
+            return " 🟥 Question";
         }
 
         return string.Empty;

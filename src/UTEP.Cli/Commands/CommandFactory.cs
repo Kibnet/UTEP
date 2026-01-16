@@ -318,6 +318,7 @@ public sealed class CommandFactory
         var riskOption = new Option<string>("--risk", () => "Med");
         var costOption = new Option<int>("--cost", () => 0);
         var confidenceOption = new Option<double>("--confidence", () => 0.5);
+        var successOption = new Option<string[]>("--success", "Критерии успешности (можно несколько).");
         var idOption = new Option<string?>("--id");
 
         newTask.AddOption(titleOption);
@@ -327,6 +328,7 @@ public sealed class CommandFactory
         newTask.AddOption(riskOption);
         newTask.AddOption(costOption);
         newTask.AddOption(confidenceOption);
+        newTask.AddOption(successOption);
         newTask.AddOption(_goalOption);
         newTask.AddOption(idOption);
 
@@ -339,6 +341,7 @@ public sealed class CommandFactory
             var risk = context.ParseResult.GetValueForOption(riskOption) ?? "Med";
             var cost = context.ParseResult.GetValueForOption(costOption);
             var confidence = context.ParseResult.GetValueForOption(confidenceOption);
+            var successCriteria = context.ParseResult.GetValueForOption(successOption) ?? Array.Empty<string>();
             var goalId = context.ParseResult.GetValueForOption(_goalOption);
             var explicitId = context.ParseResult.GetValueForOption(idOption);
 
@@ -364,7 +367,7 @@ public sealed class CommandFactory
                             Priority = priority,
                             Risk = risk,
                             CostEstimateMinutes = cost,
-                            SuccessCriteria = new List<string>(),
+                            SuccessCriteria = successCriteria.ToList(),
                             Confidence = confidence,
                             Dependencies = new TaskDependencies { BlockedBy = new List<string>() },
                             Assumptions = new List<Assumption>(),
@@ -425,7 +428,8 @@ public sealed class CommandFactory
                     var computed = _services.ComputedBuilder.Build(info.File, snapshot.Tasks, blocksCount);
                     var childrenMap = graphBuilder.BuildChildrenMap(snapshot.Tasks);
                     var blocks = snapshot.Tasks.Values
-                        .Where(child => child.File.Task.Dependencies.BlockedBy.Contains(taskId, StringComparer.OrdinalIgnoreCase))
+                        .Where(child => (child.File.Task.Dependencies?.BlockedBy ?? new List<string>())
+                            .Contains(taskId, StringComparer.OrdinalIgnoreCase))
                         .Select(child => child.File.Task.Id)
                         .ToList();
 
@@ -457,15 +461,18 @@ public sealed class CommandFactory
         var setStatus = new Command("set-status", "Установить статус задачи.");
         var statusArg = new Argument<TaskStatus>("status");
         var noteOption = new Option<string?>("--note");
+        var successOptionSet = new Option<string[]>("--success", "Критерии успешности (можно несколько).");
         setStatus.AddArgument(taskIdArg);
         setStatus.AddArgument(statusArg);
         setStatus.AddOption(noteOption);
+        setStatus.AddOption(successOptionSet);
         setStatus.AddOption(_goalOption);
         setStatus.SetHandler(async (InvocationContext context) =>
         {
             var taskId = context.ParseResult.GetValueForArgument(taskIdArg);
             var statusValue = context.ParseResult.GetValueForArgument(statusArg);
             var note = context.ParseResult.GetValueForOption(noteOption);
+            var successCriteria = context.ParseResult.GetValueForOption(successOptionSet) ?? Array.Empty<string>();
             var goalId = context.ParseResult.GetValueForOption(_goalOption);
 
             var result = await Execute(context, "utep task set-status", async () =>
@@ -481,6 +488,23 @@ public sealed class CommandFactory
                     if (!StatusRules.CanTransition(from, statusValue) && from != statusValue)
                     {
                         return InvalidTransition<TaskSetStatusResult>(taskId, from, statusValue);
+                    }
+
+                    if (successCriteria.Length > 0)
+                    {
+                        info.File.Task.SuccessCriteria = successCriteria.ToList();
+                    }
+
+                    var missingCriteria = RequiresSuccessCriteria(statusValue)
+                        && info.File.Task.SuccessCriteria.Count == 0;
+                    if (missingCriteria)
+                    {
+                        return MissingSuccessCriteria<TaskSetStatusResult>(taskId);
+                    }
+
+                    if (statusValue == TaskStatus.Question && info.File.Task.OpenQuestions.Count == 0)
+                    {
+                        return MissingOpenQuestions<TaskSetStatusResult>(taskId);
                     }
 
                     info.File.Task.Status = statusValue;
@@ -535,13 +559,18 @@ public sealed class CommandFactory
                     var computed = _services.ComputedBuilder.Build(info.File, snapshot.Tasks, blocksCount);
                     if (computed.EffectiveState != "Actionable")
                     {
-                        return NotActionable<TaskStartResult>(taskId, computed.WaitingDependencies);
+                        return NotActionable<TaskStartResult>(taskId, computed.BlockedBy);
                     }
 
                     var from = info.File.Task.Status;
                     if (from != TaskStatus.Ready)
                     {
                         return InvalidTransition<TaskStartResult>(taskId, from, TaskStatus.InProgress);
+                    }
+
+                    if (info.File.Task.SuccessCriteria.Count == 0)
+                    {
+                        return MissingSuccessCriteria<TaskStartResult>(taskId);
                     }
 
                     info.File.Task.Status = TaskStatus.InProgress;
@@ -675,7 +704,7 @@ public sealed class CommandFactory
 
                     if (info.File.Task.SuccessCriteria.Count == 0)
                     {
-                        return CompletionRequirementsMissing<TaskCompleteResult>(taskId, "success_criteria empty");
+                        return MissingSuccessCriteria<TaskCompleteResult>(taskId);
                     }
 
                     var evidence = new Evidence
@@ -801,7 +830,7 @@ public sealed class CommandFactory
 
                     info.File.Task.OpenQuestions.Add(question);
                     var from = info.File.Task.Status;
-                    info.File.Task.Status = TaskStatus.Blocked;
+                    info.File.Task.Status = TaskStatus.Question;
                     _services.Store.WriteFileAtomic(info.Path, info.File);
 
                     _services.LogWriter.AppendStatusChange(
@@ -809,7 +838,7 @@ public sealed class CommandFactory
                         snapshot.Goal.Goal.Id,
                         taskId,
                         from,
-                        TaskStatus.Blocked,
+                        TaskStatus.Question,
                         "block");
 
                     return new CommandResult<TaskBlockResult>
@@ -820,7 +849,7 @@ public sealed class CommandFactory
                         {
                             TaskId = taskId,
                             From = from,
-                            To = TaskStatus.Blocked,
+                            To = TaskStatus.Question,
                             QuestionImported = new QuestionImported
                             {
                                 File = questionFile.Replace('\\', '/'),
@@ -897,7 +926,8 @@ public sealed class CommandFactory
                     }
 
                     var blocks = snapshot.Tasks.Values
-                        .Where(child => child.File.Task.Dependencies.BlockedBy.Contains(taskId, StringComparer.OrdinalIgnoreCase))
+                        .Where(child => (child.File.Task.Dependencies?.BlockedBy ?? new List<string>())
+                            .Contains(taskId, StringComparer.OrdinalIgnoreCase))
                         .Select(child => child.File.Task.Id)
                         .ToList();
 
@@ -908,7 +938,7 @@ public sealed class CommandFactory
                         Result = new TaskDepsResult
                         {
                             TaskId = taskId,
-                            BlockedBy = info.File.Task.Dependencies.BlockedBy,
+                            BlockedBy = info.File.Task.Dependencies?.BlockedBy ?? new List<string>(),
                             Blocks = blocks
                         },
                         ExitCode = ExitCodes.Success
@@ -1300,6 +1330,8 @@ public sealed class CommandFactory
 
             if (add)
             {
+                info.File.Task.Dependencies ??= new TaskDependencies();
+                info.File.Task.Dependencies.BlockedBy ??= new List<string>();
                 if (!info.File.Task.Dependencies.BlockedBy.Contains(blockedBy, StringComparer.OrdinalIgnoreCase))
                 {
                     info.File.Task.Dependencies.BlockedBy.Add(blockedBy);
@@ -1307,6 +1339,8 @@ public sealed class CommandFactory
             }
             else
             {
+                info.File.Task.Dependencies ??= new TaskDependencies();
+                info.File.Task.Dependencies.BlockedBy ??= new List<string>();
                 info.File.Task.Dependencies.BlockedBy.RemoveAll(id => string.Equals(id, blockedBy, StringComparison.OrdinalIgnoreCase));
             }
 
@@ -1336,7 +1370,7 @@ public sealed class CommandFactory
                 {
                     TaskId = taskId,
                     Change = add ? "added" : "removed",
-                    BlockedBy = info.File.Task.Dependencies.BlockedBy,
+                    BlockedBy = info.File.Task.Dependencies?.BlockedBy ?? new List<string>(),
                     Rendered = false
                 },
                 ExitCode = ExitCodes.Success
@@ -1394,7 +1428,7 @@ public sealed class CommandFactory
                 Task = info,
                 Computed = computedBuilder.Build(info.File, snapshot.Tasks, blocksCount)
             })
-            .Where(item => item.Computed.EffectiveState == "WaitingUser" && item.Task.File.Task.OpenQuestions.Count > 0)
+            .Where(item => item.Computed.EffectiveState == "Question" && item.Task.File.Task.OpenQuestions.Count > 0)
             .OrderBy(item => depths.TryGetValue(item.Task.File.Task.Id, out var depth) ? depth : 0)
             .ThenBy(item => item.Task.File.Task.Priority)
             .ThenBy(item => item.Task.File.Task.Id, StringComparer.OrdinalIgnoreCase)
@@ -1405,8 +1439,8 @@ public sealed class CommandFactory
             var openQuestion = blockedTask.Task.File.Task.OpenQuestions.First();
             return new NextBlocking
             {
-                Kind = "user",
-                BlockedTask = new BlockedTaskInfo
+                Kind = "question",
+                QuestionTask = new QuestionTaskInfo
                 {
                     Task = new TaskRef
                     {
@@ -1438,24 +1472,24 @@ public sealed class CommandFactory
 
         var bottlenecks = _services.BottleneckAnalyzer.GetTop(snapshot.Tasks, depths, blocksCount, 1, computedBuilder);
         var top = bottlenecks.FirstOrDefault();
-        var waitingExamples = snapshot.Tasks.Values
+        var blockedExamples = snapshot.Tasks.Values
             .Select(info => new
             {
                 info.File.Task.Id,
                 Computed = computedBuilder.Build(info.File, snapshot.Tasks, blocksCount)
             })
-            .Where(item => item.Computed.EffectiveState == "WaitingDependencies")
-            .Select(item => new WaitingExample
+            .Where(item => item.Computed.EffectiveState == "Blocked")
+            .Select(item => new BlockedExample
             {
                 TaskId = item.Id,
-                WaitingOn = item.Computed.WaitingDependencies
+                BlockedOn = item.Computed.BlockedBy
             })
             .Take(5)
             .ToList();
 
         return new NextBlocking
         {
-            Kind = "dependencies",
+            Kind = "blocked",
             RecommendedBlocker = top == null
                 ? null
                 : new RecommendedBlocker
@@ -1464,7 +1498,7 @@ public sealed class CommandFactory
                     Computed = computedBuilder.Build(snapshot.Tasks[top.Task.TaskId].File, snapshot.Tasks, blocksCount),
                     BlocksCount = top.BlocksCount
                 },
-            WaitingExamples = waitingExamples
+            BlockedExamples = blockedExamples
         };
     }
 
@@ -1588,7 +1622,7 @@ public sealed class CommandFactory
         };
     }
 
-    private static CommandResult<T> NotActionable<T>(string taskId, List<string> waitingDependencies)
+    private static CommandResult<T> NotActionable<T>(string taskId, List<string> blockedBy)
     {
         return new CommandResult<T>
         {
@@ -1599,11 +1633,11 @@ public sealed class CommandFactory
                 {
                     Code = "E410",
                     Severity = "error",
-                    Message = "Task is not actionable due to dependencies",
+                    Message = "Task is not actionable due to blocked dependencies",
                     Details = new Dictionary<string, object>
                     {
                         ["task_id"] = taskId,
-                        ["waiting_dependencies"] = waitingDependencies
+                        ["blocked_by"] = blockedBy
                     },
                     Remedies = new List<Remedy>
                     {
@@ -1613,7 +1647,7 @@ public sealed class CommandFactory
                             Title = "Work on the blocker",
                             Commands = new List<string>
                             {
-                                $"utep task show {waitingDependencies.FirstOrDefault() ?? "<task_id>"} --json",
+                                $"utep task show {blockedBy.FirstOrDefault() ?? "<task_id>"} --json",
                                 "utep next --json"
                             }
                         }
@@ -1624,7 +1658,12 @@ public sealed class CommandFactory
         };
     }
 
-    private static CommandResult<T> CompletionRequirementsMissing<T>(string taskId, string reason)
+    private static bool RequiresSuccessCriteria(TaskStatus status)
+    {
+        return status is TaskStatus.Ready or TaskStatus.InProgress or TaskStatus.Completed;
+    }
+
+    private static CommandResult<T> MissingSuccessCriteria<T>(string taskId)
     {
         return new CommandResult<T>
         {
@@ -1633,13 +1672,34 @@ public sealed class CommandFactory
             {
                 new ValidationIssue
                 {
-                    Code = "E420",
+                    Code = "E006",
                     Severity = "error",
-                    Message = "Completion requirements not met",
+                    Message = "Missing success_criteria for actionable status",
                     Details = new Dictionary<string, object>
                     {
-                        ["task_id"] = taskId,
-                        ["reason"] = reason
+                        ["task_id"] = taskId
+                    }
+                }
+            },
+            ExitCode = ExitCodes.ValidationError
+        };
+    }
+
+    private static CommandResult<T> MissingOpenQuestions<T>(string taskId)
+    {
+        return new CommandResult<T>
+        {
+            Ok = false,
+            Errors = new List<ValidationIssue>
+            {
+                new ValidationIssue
+                {
+                    Code = "E008",
+                    Severity = "error",
+                    Message = "Question task without open_questions",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["task_id"] = taskId
                     }
                 }
             },

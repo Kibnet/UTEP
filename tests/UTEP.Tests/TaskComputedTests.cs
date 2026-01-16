@@ -8,7 +8,7 @@ namespace UTEP.Tests;
 public class TaskComputedTests
 {
     [Fact]
-    public void ShouldReturnWaitingDependenciesWhenBlocked()
+    public void ShouldReturnBlockedWhenWaitingOnDependencies()
     {
         var blocker = TestData.CreateTask("T-001", TaskStatus.Planned);
         var task = TestData.CreateTask("T-002", TaskStatus.Ready, blockedBy: new[] { "T-001" });
@@ -18,9 +18,9 @@ public class TaskComputedTests
         var graph = new TaskGraphBuilder();
         var computed = builder.Build(task.File, snapshot.Tasks, graph.BuildBlocksCount(snapshot.Tasks));
 
-        Assert.Equal("WaitingDependencies", computed.EffectiveState);
+        Assert.Equal("Blocked", computed.EffectiveState);
         Assert.False(computed.IsUnblocked);
-        Assert.Contains("T-001", computed.WaitingDependencies);
+        Assert.Contains("T-001", computed.BlockedBy);
     }
 
     [Fact]

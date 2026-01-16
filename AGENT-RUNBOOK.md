@@ -21,8 +21,8 @@
 2. если есть actionable:
      выбрать первую
    иначе:
-     если WaitingUser → задать вопрос и остановиться
-     если WaitingDependencies → взять блокер
+     если Question → задать вопрос и остановиться
+     если Blocked → взять блокер
      если ничего → остановиться
 3. utep task show <id> --json
 4. Проверка актуальности
@@ -68,11 +68,19 @@
 * задача всё ещё актуальна?
 * цель не изменилась?
 * зависимости действительно сняты?
+* `success_criteria` заполнены
+* `dependencies.blocked_by` явно указан (даже если пустой)
+
+## Обязательные поля
+
+* `success_criteria` — задавать при `utep task new --success ...` или при `utep task set-status ... --success ...`
+* `open_questions` — только через `utep task block --question-file ...` (статус `Question`)
+* `dependencies.blocked_by` — через `utep task dep add|rm ...`, пустой список допустим
 
 ---
 
 ## Запрещённые действия
 
-* пропуск `Blocked`
+* пропуск `Question`
 * автоматическое закрытие задач без evidence
 * выполнение задач не из `next`

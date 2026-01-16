@@ -1,4 +1,4 @@
-# UTEP CLI v1.0 (JSON + Dependencies + Doctor)
+﻿# UTEP CLI v1.0 (JSON + Dependencies + Doctor)
 
 ## 0) Главные принципы (обновлённые)
 
@@ -154,18 +154,18 @@
 Файлы хранят “сырое”, CLI вычисляет:
 
 * `is_unblocked`: все `blocked_by` в терминальном статусе
-* `waiting_dependencies`: список зависимостей, которые ещё не терминальны
+* `blocked_by`: список зависимостей, которые ещё не терминальны
 * `needs_review`: true если любой блокер терминален, но **не Completed**
   (Cancelled/Invalidated) → значит зависимая задача может требовать переоценки успех-критериев
 * `effective_state`:
 
   * `Actionable` (Ready + unblocked)
-  * `WaitingDependencies` (Ready, но blocked_by не закрыты)
-  * `WaitingUser` (status Blocked и есть open_questions)
+  * `Blocked` (Ready, но blocked_by не закрыты)
+* `Question` (status Question и есть open_questions)
   * `Terminal` (Completed/Cancelled/Invalidated)
   * `NotReady` (Draft/Planned)
 
-**Ключ:** “WaitingDependencies” — не статус в файле, а вычисляемый флаг.
+**Ключ:** “Blocked” — не статус в файле, а вычисляемый флаг.
 
 ---
 
@@ -186,8 +186,8 @@
 * exit code `5`
 * возвращает structured explanation:
 
-  * если есть `Blocked` с вопросами на верхнем уровне → “WaitingUser”
-  * иначе “WaitingDependencies” с рекомендацией “какие задачи завершить” (top bottleneck)
+* если есть `Question` с вопросами на верхнем уровне → “Question”
+  * иначе “Blocked” с рекомендацией “какие задачи завершить” (top bottleneck)
 
 **Пример `--json` ответа, когда пусто:**
 
@@ -195,15 +195,17 @@
 {
   "goal_id": "G-2026-001",
   "actionable": [],
-  "blocking_kind": "dependencies",
-  "recommended_blocker": {
-    "task_id": "T-005",
-    "title": "Выбрать архитектуру",
-    "blocks_count": 6
-  },
-  "waiting_examples": [
-    {"task_id": "T-010", "waiting_on": ["T-005"]}
-  ]
+  "blocking": {
+    "kind": "blocked",
+    "recommended_blocker": {
+      "task_id": "T-005",
+      "title": "Выбрать архитектуру",
+      "blocks_count": 6
+    },
+    "blocked_examples": [
+      {"task_id": "T-010", "blocked_on": ["T-005"]}
+    ]
+  }
 }
 ```
 
@@ -257,11 +259,19 @@
    Remedies:
 
    * добавить evidence-template
-5. `E005 BlockedWithoutQuestion`
+5. `E008 QuestionWithoutOpenQuestions`
    Remedies:
 
    * создать шаблон вопроса и импортировать
-6. `E006 InvalidStatusTransitionDetectedInLog` (если используешь восстановление)
+6. `E006 MissingSuccessCriteria`
+   Remedies:
+
+   * добавить success_criteria через CLI (перед переводом в Ready/InProgress/Completed)
+7. `E007 MissingBlockedByList`
+   Remedies:
+
+   * явно задать пустой список blocked_by
+8. `E009 InvalidStatusTransitionDetectedInLog` (если используешь восстановление)
    Remedies:
 
    * “replay from snapshot” / “ignore log”
@@ -304,8 +314,8 @@
 1) `utep next --count 5 --json`
    - if actionable not empty -> pick first
    - else:
-       - if blocking_kind == "user": ask user the stored question and stop
-       - if blocking_kind == "dependencies": run `utep bottlenecks --top 5 --json`,
+       - if blocking.kind == "question": ask user the stored question and stop
+       - if blocking.kind == "blocked": run `utep bottlenecks --top 5 --json`,
          pick the best blocker task (if any is actionable) and work on it
        - if nothing actionable at all: stop and report
 
@@ -323,14 +333,14 @@
 
 В дереве оставляем только короткий маркер:
 
-* `⛔ deps: T-005,T-007` если `WaitingDependencies`
+* `⛔ blocked: T-005,T-007` если `Blocked`
 * `⚠ review` если `needs_review == true`
-* `🟥 Blocked` если есть open_questions
+* `🟥 Question` если есть open_questions
 
 Плюс отдельный раздел:
 
 * **Bottlenecks** (топ блокеров)
-* **Waiting** (несколько примеров “что на что ждёт”)
+* **Blocked** (несколько примеров “что на что ждёт”)
 
 ---
 
@@ -361,7 +371,7 @@ CLI всегда пишет:
 
 * YAML → JSON
 * зависимости без политик: `blocked_by: string[]`
-* `WaitingDependencies` и `needs_review` вычисляются, не хранятся как статус
+* `Blocked` и `needs_review` вычисляются, не хранятся как статус
 * `next` никогда не выдаёт невыполнимое, но объясняет “почему пусто”
 * `doctor` для разруливания всех типов валидаций + degraded mode
 
@@ -468,7 +478,7 @@ CLI всегда пишет:
 
 ## 1.1 TaskStatus
 
-`Draft|Planned|Ready|InProgress|Blocked|Completed|Cancelled|Invalidated`
+`Draft|Planned|Ready|InProgress|Question|Completed|Cancelled|Invalidated`
 
 ## 1.2 TaskRef (краткая ссылка)
 
@@ -485,15 +495,15 @@ CLI всегда пишет:
 
 ## 1.3 EffectiveState (вычисляемое)
 
-`Actionable|WaitingDependencies|WaitingUser|Terminal|NotReady`
+`Actionable|Blocked|Question|Terminal|NotReady`
 
 ## 1.4 TaskComputed (вычисляемые поля)
 
 ```json
 {
-  "effective_state": "WaitingDependencies",
+  "effective_state": "Blocked",
   "is_unblocked": false,
-  "waiting_dependencies": ["T-005"],
+  "blocked_by": ["T-005"],
   "needs_review": false,
   "blocks_count": 6
 }
@@ -508,7 +518,7 @@ CLI всегда пишет:
   "status": "Planned",
   "counts": {
     "Draft": 0, "Planned": 2, "Ready": 1, "InProgress": 0,
-    "Blocked": 1, "Completed": 3, "Cancelled": 0, "Invalidated": 0
+    "Question": 1, "Completed": 3, "Cancelled": 0, "Invalidated": 0
   },
   "next_task_id": "T-003",
   "repo_path": "goals/G-2026-001/"
@@ -643,9 +653,9 @@ CLI всегда пишет:
     "links": { "artifacts_dir": "../artifacts/" }
   },
   "computed": {
-    "effective_state": "WaitingDependencies",
+    "effective_state": "Blocked",
     "is_unblocked": false,
-    "waiting_dependencies": ["T-005"],
+    "blocked_by": ["T-005"],
     "needs_review": false,
     "blocks_count": 6
   },
@@ -695,7 +705,7 @@ CLI всегда пишет:
 }
 ```
 
-Если задача не actionable (waiting deps) → `ok:false`, `errors` с `code:"E410"` и `details.waiting_dependencies`.
+Если задача не actionable (waiting deps) → `ok:false`, `errors` с `code:"E410"` и `details.blocked_by`.
 
 ---
 
@@ -737,7 +747,9 @@ CLI всегда пишет:
 }
 ```
 
-Если не выполнены минимальные требования (нет criteria/evidence) → `E420`.
+Если не выполнены минимальные требования:
+* нет success_criteria → `E006`
+* нет evidence → `E004`
 
 ---
 
@@ -765,7 +777,7 @@ CLI всегда пишет:
 {
   "task_id": "T-010",
   "from": "InProgress",
-  "to": "Blocked",
+  "to": "Question",
   "question_imported": {
     "file": "questions/T-010.md",
     "open_question_id": "Q-02",
@@ -828,10 +840,10 @@ CLI всегда пишет:
 {
   "actionable": [],
   "blocking": {
-    "kind": "user",
-    "blocked_task": {
+    "kind": "question",
+    "question_task": {
       "task": { "...TaskRef..." },
-      "computed": { "effective_state":"WaitingUser", "...": "..." }
+      "computed": { "effective_state":"Question", "...": "..." }
     },
     "question": {
       "task_id": "T-002",
@@ -846,20 +858,20 @@ CLI всегда пишет:
 }
 ```
 
-Или `kind:"dependencies"`:
+Или `kind:"blocked"`:
 
 ```json
 {
   "actionable": [],
   "blocking": {
-    "kind": "dependencies",
+    "kind": "blocked",
     "recommended_blocker": {
       "task": { "...TaskRef..." },
       "computed": { "...TaskComputed..." },
       "blocks_count": 6
     },
-    "waiting_examples": [
-      {"task_id":"T-010","waiting_on":["T-005"]}
+    "blocked_examples": [
+      {"task_id":"T-010","blocked_on":["T-005"]}
     ]
   }
 }
@@ -956,7 +968,7 @@ Exit code: `5`.
 
 * `E400 InvalidTransition` (exit 4)
 * `E410 NotActionable` (trying start when waiting deps/user) (exit 4)
-* `E420 CompletionRequirementsNotMet` (exit 2)
+* `E006 MissingSuccessCriteria` (exit 2)
 * `E430 QuestionParseError` (exit 2)
 * `E440 NotFound` (task/goal) (exit 3)
 * `E450 RepoNotInitialized` (exit 3)
@@ -970,7 +982,7 @@ Exit code: `5`.
     "code": "E410",
     "severity": "error",
     "message": "Task is not actionable due to dependencies",
-    "details": {"waiting_dependencies":["T-005"]},
+    "details": {"blocked_by":["T-005"]},
     "remedies": [{
       "id":"R1",
       "title":"Work on the blocker",

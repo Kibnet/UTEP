@@ -10,8 +10,19 @@ public static class TestData
         string id,
         TaskStatus status,
         string? parentId = null,
-        IEnumerable<string>? blockedBy = null)
+        IEnumerable<string>? blockedBy = null,
+        bool includeDependencies = true,
+        bool nullBlockedBy = false)
     {
+        TaskDependencies? dependencies = null;
+        if (includeDependencies)
+        {
+            dependencies = new TaskDependencies
+            {
+                BlockedBy = nullBlockedBy ? null : (blockedBy?.ToList() ?? new List<string>())
+            };
+        }
+
         var task = new TaskFile
         {
             Version = 1,
@@ -23,10 +34,7 @@ public static class TestData
                 Title = $"Task {id}",
                 Status = status,
                 Priority = 2,
-                Dependencies = new TaskDependencies
-                {
-                    BlockedBy = blockedBy?.ToList() ?? new List<string>()
-                }
+                Dependencies = dependencies
             },
             Links = new TaskLinks()
         };

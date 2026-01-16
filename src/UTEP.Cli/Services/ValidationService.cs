@@ -14,7 +14,29 @@ public sealed class ValidationService
         foreach (var (taskId, info) in tasks)
         {
             var task = info.File.Task;
-            foreach (var blocker in task.Dependencies.BlockedBy)
+            var blockedBy = task.Dependencies?.BlockedBy;
+            if (blockedBy == null)
+            {
+                issues.Add(new ValidationIssue
+                {
+                    Code = "E007",
+                    Severity = "error",
+                    Message = "Missing dependencies.blocked_by list",
+                    Locations = new List<IssueLocation>
+                    {
+                        new IssueLocation
+                        {
+                            Kind = "task",
+                            Id = taskId,
+                            Path = ToRepoPath(repoRoot, info.Path),
+                            JsonPointer = "/task/dependencies/blocked_by"
+                        }
+                    }
+                });
+                blockedBy = new List<string>();
+            }
+
+            foreach (var blocker in blockedBy)
             {
                 if (!taskIds.Contains(blocker))
                 {
@@ -121,13 +143,46 @@ public sealed class ValidationService
                 });
             }
 
-            if (task.Status == TaskStatus.Blocked && task.OpenQuestions.Count == 0)
+            if (task.Status is TaskStatus.Ready or TaskStatus.InProgress or TaskStatus.Completed
+                && task.SuccessCriteria.Count == 0)
             {
                 issues.Add(new ValidationIssue
                 {
-                    Code = "E005",
+                    Code = "E006",
                     Severity = "error",
-                    Message = "Blocked task without question",
+                    Message = "Missing success_criteria for actionable status",
+                    Locations = new List<IssueLocation>
+                    {
+                        new IssueLocation
+                        {
+                            Kind = "task",
+                            Id = taskId,
+                            Path = ToRepoPath(repoRoot, info.Path),
+                            JsonPointer = "/task/success_criteria"
+                        }
+                    },
+                    Remedies = new List<Remedy>
+                    {
+                        new Remedy
+                        {
+                            Id = "R1",
+                            Title = "Add success criteria",
+                            Commands = new List<string>
+                            {
+                                $"utep task set-status {taskId} {task.Status} --success \"...\""
+                            }
+                        }
+                    }
+                });
+            }
+
+            if (task.Status == TaskStatus.Question && task.OpenQuestions.Count == 0)
+            {
+                issues.Add(new ValidationIssue
+                {
+                    Code = "E008",
+                    Severity = "error",
+                    Message = "Question task without open_questions",
                     Locations = new List<IssueLocation>
                     {
                         new IssueLocation
@@ -217,7 +272,8 @@ public sealed class ValidationService
 
         if (tasks.TryGetValue(taskId, out var info))
         {
-            foreach (var blocker in info.File.Task.Dependencies.BlockedBy)
+            var blockedBy = info.File.Task.Dependencies?.BlockedBy ?? new List<string>();
+            foreach (var blocker in blockedBy)
             {
                 if (tasks.ContainsKey(blocker))
                 {
