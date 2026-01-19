@@ -12,7 +12,8 @@ public static class TestData
         string? parentId = null,
         IEnumerable<string>? blockedBy = null,
         bool includeDependencies = true,
-        bool nullBlockedBy = false)
+        bool nullBlockedBy = false,
+        int openQuestions = 0)
     {
         TaskDependencies? dependencies = null;
         if (includeDependencies)
@@ -34,7 +35,17 @@ public static class TestData
                 Title = $"Task {id}",
                 Status = status,
                 Priority = 2,
-                Dependencies = dependencies
+                Dependencies = dependencies,
+                OpenQuestions = Enumerable.Range(1, openQuestions)
+                    .Select(index => new OpenQuestion
+                    {
+                        Id = $"Q-{index:00}",
+                        Kind = "test",
+                        Question = "Test question",
+                        RequestedAnswer = "Answer",
+                        CreatedAt = "2026-01-01T00:00:00Z"
+                    })
+                    .ToList()
             },
             Links = new TaskLinks()
         };

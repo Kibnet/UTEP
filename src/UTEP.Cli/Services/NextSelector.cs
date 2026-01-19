@@ -1,4 +1,5 @@
 using UTEP.Cli.Domain;
+using TaskStatus = UTEP.Cli.Domain.TaskStatus;
 
 namespace UTEP.Cli.Services;
 
@@ -54,5 +55,22 @@ public sealed class NextSelector
             .ToList();
 
         return ordered;
+    }
+
+    public string ResolveNoActionableReason(
+        IReadOnlyDictionary<string, TaskInfo> tasks,
+        Dictionary<string, int> blocksCount,
+        TaskComputedBuilder computedBuilder)
+    {
+        var hasQuestion = tasks.Values.Any(info =>
+            info.File.Task.Status == TaskStatus.Question && info.File.Task.OpenQuestions.Count > 0);
+        if (hasQuestion)
+        {
+            return "question";
+        }
+
+        var hasBlocked = tasks.Values.Any(info =>
+            computedBuilder.Build(info.File, tasks, blocksCount).EffectiveState == "Blocked");
+        return hasBlocked ? "blocked" : "none";
     }
 }

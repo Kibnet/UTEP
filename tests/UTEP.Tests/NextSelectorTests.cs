@@ -44,4 +44,47 @@ public class NextSelectorTests
 
         Assert.Equal("T-001", actionable[0].Task.TaskId);
     }
+
+    [Fact]
+    public void ShouldReturnQuestionReasonWhenOpenQuestionsExist()
+    {
+        var questionTask = TestData.CreateTask("T-001", TaskStatus.Question, openQuestions: 1);
+        var snapshot = TestData.CreateSnapshot(questionTask);
+        var selector = new NextSelector();
+        var graph = new TaskGraphBuilder();
+        var blocksCount = graph.BuildBlocksCount(snapshot.Tasks);
+
+        var reason = selector.ResolveNoActionableReason(snapshot.Tasks, blocksCount, new TaskComputedBuilder());
+
+        Assert.Equal("question", reason);
+    }
+
+    [Fact]
+    public void ShouldReturnBlockedReasonWhenBlockedTasksExist()
+    {
+        var blocked = TestData.CreateTask("T-001", TaskStatus.Ready, blockedBy: new[] { "T-002" });
+        var blocker = TestData.CreateTask("T-002", TaskStatus.Planned);
+        var snapshot = TestData.CreateSnapshot(blocked, blocker);
+        var selector = new NextSelector();
+        var graph = new TaskGraphBuilder();
+        var blocksCount = graph.BuildBlocksCount(snapshot.Tasks);
+
+        var reason = selector.ResolveNoActionableReason(snapshot.Tasks, blocksCount, new TaskComputedBuilder());
+
+        Assert.Equal("blocked", reason);
+    }
+
+    [Fact]
+    public void ShouldReturnNoneReasonWhenNoQuestionsOrBlockedTasksExist()
+    {
+        var planned = TestData.CreateTask("T-001", TaskStatus.Planned);
+        var snapshot = TestData.CreateSnapshot(planned);
+        var selector = new NextSelector();
+        var graph = new TaskGraphBuilder();
+        var blocksCount = graph.BuildBlocksCount(snapshot.Tasks);
+
+        var reason = selector.ResolveNoActionableReason(snapshot.Tasks, blocksCount, new TaskComputedBuilder());
+
+        Assert.Equal("none", reason);
+    }
 }

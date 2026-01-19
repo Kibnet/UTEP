@@ -136,7 +136,7 @@ public sealed class ValidationService
                             Title = "Add evidence note",
                             Commands = new List<string>
                             {
-                                $"utep task attempt {taskId} --note \"Add evidence\""
+                                $"utep task attempt {taskId} --evidence \"Add evidence\""
                             }
                         }
                     }
@@ -146,11 +146,12 @@ public sealed class ValidationService
             if (task.Status is TaskStatus.Ready or TaskStatus.InProgress or TaskStatus.Completed
                 && task.SuccessCriteria.Count == 0)
             {
+                var hint = $"utep task set-status {taskId} {task.Status} --success \"...\"";
                 issues.Add(new ValidationIssue
                 {
                     Code = "E006",
                     Severity = "error",
-                    Message = "Missing success_criteria for actionable status",
+                    Message = $"Missing success_criteria for actionable status. Use: {hint}",
                     Locations = new List<IssueLocation>
                     {
                         new IssueLocation
@@ -169,7 +170,7 @@ public sealed class ValidationService
                             Title = "Add success criteria",
                             Commands = new List<string>
                             {
-                                $"utep task set-status {taskId} {task.Status} --success \"...\""
+                                hint
                             }
                         }
                     }
@@ -201,7 +202,7 @@ public sealed class ValidationService
                             Title = "Add placeholder question",
                             Commands = new List<string>
                             {
-                                $"utep task block {taskId} --question-file questions/{taskId}.question.json"
+                                $"utep task question {taskId} --kind general --question \"Нужна дополнительная информация\" --requested-answer \"Опишите решение\""
                             }
                         }
                     }

@@ -35,6 +35,7 @@ public sealed class CommandFactory
             BuildBottlenecks(),
             BuildValidate(),
             BuildDoctor(),
+            BuildDiagnose(),
             BuildRender()
         };
     }
@@ -86,10 +87,13 @@ public sealed class CommandFactory
 
         var newGoal = new Command("new", "Создать цель.");
         var titleOption = new Option<string>("--title") { IsRequired = true };
+        var successOption = new Option<string[]>("--success", "Критерии успешности (можно несколько).");
         newGoal.AddOption(titleOption);
+        newGoal.AddOption(successOption);
         newGoal.SetHandler(async (InvocationContext context) =>
         {
             var title = context.ParseResult.GetValueForOption(titleOption) ?? string.Empty;
+            var successCriteria = context.ParseResult.GetValueForOption(successOption) ?? Array.Empty<string>();
             var result = await Execute(context, "utep goal new", () =>
             {
                 var repoRoot = RequireRepoRoot(context);
@@ -117,7 +121,7 @@ public sealed class CommandFactory
                         Status = GoalStatus.Planned,
                         CreatedAt = now,
                         UpdatedAt = now,
-                        SuccessCriteria = new List<string>(),
+                        SuccessCriteria = successCriteria.ToList(),
                         NextTaskId = null
                     },
                     Meta = new GoalMeta()
@@ -499,7 +503,7 @@ public sealed class CommandFactory
                         && info.File.Task.SuccessCriteria.Count == 0;
                     if (missingCriteria)
                     {
-                        return MissingSuccessCriteria<TaskSetStatusResult>(taskId);
+                        return MissingSuccessCriteria<TaskSetStatusResult>(taskId, statusValue);
                     }
 
                     if (statusValue == TaskStatus.Question && info.File.Task.OpenQuestions.Count == 0)
@@ -570,7 +574,7 @@ public sealed class CommandFactory
 
                     if (info.File.Task.SuccessCriteria.Count == 0)
                     {
-                        return MissingSuccessCriteria<TaskStartResult>(taskId);
+                        return MissingSuccessCriteria<TaskStartResult>(taskId, TaskStatus.InProgress);
                     }
 
                     info.File.Task.Status = TaskStatus.InProgress;
@@ -607,10 +611,12 @@ public sealed class CommandFactory
             WriteResult(context, result);
         });
         var attempt = new Command("attempt", "Зафиксировать попытку.");
-        var noteOptionAttempt = new Option<string>("--note") { IsRequired = true };
+        var evidenceOptionAttempt = new Option<string?>("--evidence");
+        var noteOptionAttempt = new Option<string?>("--note");
         var minutesOption = new Option<int?>("--minutes");
         var evidenceFileOption = new Option<string?>("--evidence-file");
         attempt.AddArgument(taskIdArg);
+        attempt.AddOption(evidenceOptionAttempt);
         attempt.AddOption(noteOptionAttempt);
         attempt.AddOption(minutesOption);
         attempt.AddOption(evidenceFileOption);
@@ -618,7 +624,8 @@ public sealed class CommandFactory
         attempt.SetHandler(async (InvocationContext context) =>
         {
             var taskId = context.ParseResult.GetValueForArgument(taskIdArg);
-            var note = context.ParseResult.GetValueForOption(noteOptionAttempt) ?? string.Empty;
+            var evidenceText = context.ParseResult.GetValueForOption(evidenceOptionAttempt);
+            var note = context.ParseResult.GetValueForOption(noteOptionAttempt);
             var minutes = context.ParseResult.GetValueForOption(minutesOption);
             var evidenceFile = context.ParseResult.GetValueForOption(evidenceFileOption);
             var goalId = context.ParseResult.GetValueForOption(_goalOption);
@@ -630,6 +637,20 @@ public sealed class CommandFactory
                     if (!snapshot.Tasks.TryGetValue(taskId, out var info))
                     {
                         return NotFound<TaskAttemptResult>("task", taskId, $"goals/{snapshot.Goal.Goal.Id}/tasks/{taskId}.task.json");
+                    }
+
+                    var evidenceContent = !string.IsNullOrWhiteSpace(evidenceText)
+                        ? evidenceText
+                        : (string.IsNullOrWhiteSpace(note) ? null : note);
+
+                    if (!string.IsNullOrWhiteSpace(evidenceFile) && File.Exists(evidenceFile))
+                    {
+                        evidenceContent = File.ReadAllText(evidenceFile);
+                    }
+
+                    if (string.IsNullOrWhiteSpace(evidenceContent))
+                    {
+                        return MissingEvidence<TaskAttemptResult>(taskId);
                     }
 
                     var beforeAttempts = info.File.Task.Attempts;
@@ -644,14 +665,9 @@ public sealed class CommandFactory
                     var evidence = new Evidence
                     {
                         Kind = "note",
-                        Text = note,
+                        Text = evidenceContent,
                         At = _services.Clock.Now.ToString("o")
                     };
-
-                    if (!string.IsNullOrWhiteSpace(evidenceFile) && File.Exists(evidenceFile))
-                    {
-                        evidence.Text = File.ReadAllText(evidenceFile);
-                    }
 
                     info.File.Task.Evidence.Add(evidence);
                     _services.Store.WriteFileAtomic(info.Path, info.File);
@@ -660,7 +676,7 @@ public sealed class CommandFactory
                         new RepoPaths(RequireRepoRoot(context)!).LogFile(snapshot.Goal.Goal.Id),
                         snapshot.Goal.Goal.Id,
                         taskId,
-                        note);
+                        evidenceContent);
 
                     return new CommandResult<TaskAttemptResult>
                     {
@@ -683,14 +699,17 @@ public sealed class CommandFactory
         });
 
         var complete = new Command("complete", "Завершить задачу.");
-        var evidenceOption = new Option<string>("--evidence") { IsRequired = true };
+        var evidenceOption = new Option<string?>("--evidence");
+        var evidenceFileOptionComplete = new Option<string?>("--evidence-file");
         complete.AddArgument(taskIdArg);
         complete.AddOption(evidenceOption);
+        complete.AddOption(evidenceFileOptionComplete);
         complete.AddOption(_goalOption);
         complete.SetHandler(async (InvocationContext context) =>
         {
             var taskId = context.ParseResult.GetValueForArgument(taskIdArg);
-            var evidenceText = context.ParseResult.GetValueForOption(evidenceOption) ?? string.Empty;
+            var evidenceText = context.ParseResult.GetValueForOption(evidenceOption);
+            var evidenceFile = context.ParseResult.GetValueForOption(evidenceFileOptionComplete);
             var goalId = context.ParseResult.GetValueForOption(_goalOption);
 
             var result = await Execute(context, "utep task complete", async () =>
@@ -704,13 +723,24 @@ public sealed class CommandFactory
 
                     if (info.File.Task.SuccessCriteria.Count == 0)
                     {
-                        return MissingSuccessCriteria<TaskCompleteResult>(taskId);
+                        return MissingSuccessCriteria<TaskCompleteResult>(taskId, TaskStatus.Completed);
+                    }
+
+                    var evidenceContent = evidenceText;
+                    if (!string.IsNullOrWhiteSpace(evidenceFile) && File.Exists(evidenceFile))
+                    {
+                        evidenceContent = File.ReadAllText(evidenceFile);
+                    }
+
+                    if (string.IsNullOrWhiteSpace(evidenceContent))
+                    {
+                        return MissingEvidence<TaskCompleteResult>(taskId);
                     }
 
                     var evidence = new Evidence
                     {
                         Kind = "completion",
-                        Text = evidenceText,
+                        Text = evidenceContent,
                         At = _services.Clock.Now.ToString("o")
                     };
                     info.File.Task.Evidence.Add(evidence);
@@ -866,6 +896,182 @@ public sealed class CommandFactory
             WriteResult(context, result);
         });
 
+        var question = new Command("question", "Создать вопрос для задачи.");
+        var questionKindOption = new Option<string>("--kind") { IsRequired = true };
+        var questionTextOption = new Option<string>("--question") { IsRequired = true };
+        var questionOptionOption = new Option<string[]>("--option");
+        var recommendationOption = new Option<string?>("--recommendation");
+        var requestedAnswerOption = new Option<string>("--requested-answer") { IsRequired = true };
+        question.AddArgument(taskIdArg);
+        question.AddOption(questionKindOption);
+        question.AddOption(questionTextOption);
+        question.AddOption(questionOptionOption);
+        question.AddOption(recommendationOption);
+        question.AddOption(requestedAnswerOption);
+        question.AddOption(_goalOption);
+        question.SetHandler(async (InvocationContext context) =>
+        {
+            var taskId = context.ParseResult.GetValueForArgument(taskIdArg);
+            var kind = context.ParseResult.GetValueForOption(questionKindOption) ?? string.Empty;
+            var questionText = context.ParseResult.GetValueForOption(questionTextOption) ?? string.Empty;
+            var optionsInput = context.ParseResult.GetValueForOption(questionOptionOption) ?? Array.Empty<string>();
+            var recommendation = context.ParseResult.GetValueForOption(recommendationOption);
+            var requestedAnswer = context.ParseResult.GetValueForOption(requestedAnswerOption) ?? string.Empty;
+            var goalId = context.ParseResult.GetValueForOption(_goalOption);
+
+            var result = await Execute(context, "utep task question", async () =>
+            {
+                return await WithGoal(context, goalId, snapshot =>
+                {
+                    if (!snapshot.Tasks.TryGetValue(taskId, out var info))
+                    {
+                        return NotFound<TaskQuestionResult>("task", taskId, $"goals/{snapshot.Goal.Goal.Id}/tasks/{taskId}.task.json");
+                    }
+
+                    if (!TryParseQuestionOptions(optionsInput, out var options, out var parseError))
+                    {
+                        return InvalidQuestionAnswer<TaskQuestionResult>(taskId, parseError ?? "Invalid question option format");
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(recommendation))
+                    {
+                        if (options.Count == 0)
+                        {
+                            return InvalidQuestionAnswer<TaskQuestionResult>(taskId, "Recommendation requires options");
+                        }
+
+                        if (options.All(option => !string.Equals(option.Id, recommendation, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            return InvalidQuestionAnswer<TaskQuestionResult>(taskId, "Recommendation does not match available options");
+                        }
+                    }
+
+                    var questionId = NextQuestionId(info.File.Task.OpenQuestions);
+                    info.File.Task.OpenQuestions.Add(new OpenQuestion
+                    {
+                        Id = questionId,
+                        Kind = kind,
+                        Question = questionText,
+                        Options = options,
+                        Recommendation = string.IsNullOrWhiteSpace(recommendation) ? null : recommendation,
+                        RequestedAnswer = requestedAnswer,
+                        Answer = null,
+                        CreatedAt = _services.Clock.Now.ToString("o")
+                    });
+
+                    var from = info.File.Task.Status;
+                    info.File.Task.Status = TaskStatus.Question;
+                    _services.Store.WriteFileAtomic(info.Path, info.File);
+                    _services.LogWriter.AppendStatusChange(
+                        new RepoPaths(RequireRepoRoot(context)!).LogFile(snapshot.Goal.Goal.Id),
+                        snapshot.Goal.Goal.Id,
+                        taskId,
+                        from,
+                        TaskStatus.Question,
+                        "question");
+
+                    return new CommandResult<TaskQuestionResult>
+                    {
+                        Ok = true,
+                        GoalId = snapshot.Goal.Goal.Id,
+                        Result = new TaskQuestionResult
+                        {
+                            TaskId = taskId,
+                            From = from,
+                            To = TaskStatus.Question,
+                            OpenQuestionId = questionId,
+                            Rendered = false
+                        },
+                        ExitCode = ExitCodes.Success
+                    };
+                });
+            });
+
+            WriteResult(context, result);
+        });
+
+        var answer = new Command("answer", "Зафиксировать ответ на вопрос.");
+        var answerOption = new Option<string?>("--option");
+        var answerTextOption = new Option<string?>("--text");
+        answer.AddArgument(taskIdArg);
+        answer.AddOption(answerOption);
+        answer.AddOption(answerTextOption);
+        answer.AddOption(_goalOption);
+        answer.SetHandler(async (InvocationContext context) =>
+        {
+            var taskId = context.ParseResult.GetValueForArgument(taskIdArg);
+            var optionId = context.ParseResult.GetValueForOption(answerOption);
+            var textAnswer = context.ParseResult.GetValueForOption(answerTextOption);
+            var goalId = context.ParseResult.GetValueForOption(_goalOption);
+
+            var result = await Execute(context, "utep task answer", async () =>
+            {
+                return await WithGoal(context, goalId, snapshot =>
+                {
+                    if (!snapshot.Tasks.TryGetValue(taskId, out var info))
+                    {
+                        return NotFound<TaskAnswerResult>("task", taskId, $"goals/{snapshot.Goal.Goal.Id}/tasks/{taskId}.task.json");
+                    }
+
+                    if (info.File.Task.OpenQuestions.Count == 0)
+                    {
+                        return MissingOpenQuestions<TaskAnswerResult>(taskId);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(optionId) && !string.IsNullOrWhiteSpace(textAnswer))
+                    {
+                        return InvalidQuestionAnswer<TaskAnswerResult>(taskId, "Use either --option or --text");
+                    }
+
+                    var openQuestion = info.File.Task.OpenQuestions.First();
+                    string? answerValue = null;
+
+                    if (openQuestion.Options.Count > 0)
+                    {
+                        if (string.IsNullOrWhiteSpace(optionId))
+                        {
+                            return InvalidQuestionAnswer<TaskAnswerResult>(taskId, "Answer requires --option for question with options");
+                        }
+
+                        if (openQuestion.Options.All(option => !string.Equals(option.Id, optionId, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            return InvalidQuestionAnswer<TaskAnswerResult>(taskId, "Answer option is not in open_questions options");
+                        }
+
+                        answerValue = optionId;
+                    }
+                    else
+                    {
+                        if (string.IsNullOrWhiteSpace(textAnswer))
+                        {
+                            return InvalidQuestionAnswer<TaskAnswerResult>(taskId, "Answer requires --text when options are empty");
+                        }
+
+                        answerValue = textAnswer;
+                    }
+
+                    openQuestion.Answer = answerValue;
+                    _services.Store.WriteFileAtomic(info.Path, info.File);
+
+                    return new CommandResult<TaskAnswerResult>
+                    {
+                        Ok = true,
+                        GoalId = snapshot.Goal.Goal.Id,
+                        Result = new TaskAnswerResult
+                        {
+                            TaskId = taskId,
+                            OpenQuestionId = openQuestion.Id,
+                            Answer = answerValue,
+                            Rendered = false
+                        },
+                        ExitCode = ExitCodes.Success
+                    };
+                });
+            });
+
+            WriteResult(context, result);
+        });
+
         var dep = new Command("dep", "Управление зависимостями.");
         var depAdd = new Command("add", "Добавить зависимость.");
         var depRm = new Command("rm", "Удалить зависимость.");
@@ -958,6 +1164,8 @@ public sealed class CommandFactory
         task.AddCommand(invalidate);
         task.AddCommand(cancel);
         task.AddCommand(block);
+        task.AddCommand(question);
+        task.AddCommand(answer);
         task.AddCommand(dep);
         task.AddCommand(deps);
 
@@ -988,18 +1196,18 @@ public sealed class CommandFactory
                         {
                             Ok = true,
                             GoalId = snapshot.Goal.Goal.Id,
-                            Result = new NextResult { Actionable = actionable.ToList(), Blocking = null },
+                            Result = new NextResult { Actionable = actionable.ToList(), Reason = null, Blocking = null },
                             Warnings = issues,
                             ExitCode = ExitCodes.Success
                         };
                     }
 
-                    var blocking = BuildBlocking(snapshot, depths, blocksCount);
+                    var reason = _services.NextSelector.ResolveNoActionableReason(snapshot.Tasks, blocksCount, _services.ComputedBuilder);
                     return new CommandResult<NextResult>
                     {
                         Ok = false,
                         GoalId = snapshot.Goal.Goal.Id,
-                        Result = new NextResult { Actionable = new List<ActionableItem>(), Blocking = blocking },
+                        Result = new NextResult { Actionable = new List<ActionableItem>(), Reason = reason, Blocking = null },
                         Warnings = issues,
                         ExitCode = ExitCodes.NoActionable
                     };
@@ -1111,6 +1319,74 @@ public sealed class CommandFactory
                         Result = doctorResult,
                         ExitCode = doctorResult.Summary.ErrorsAfter == 0 ? ExitCodes.Success : ExitCodes.ValidationError,
                         Errors = doctorResult.RemainingIssues.Where(issue => issue.Severity == "error").ToList()
+                    };
+                });
+            });
+
+            WriteResult(context, result);
+        });
+
+        return command;
+    }
+
+    private Command BuildDiagnose()
+    {
+        var command = new Command("diagnose", "Диагностика репозитория.");
+        var fixOption = new Option<bool>("--fix");
+        command.AddOption(fixOption);
+        command.AddOption(_goalOption);
+        command.SetHandler(async (InvocationContext context) =>
+        {
+            var goalId = context.ParseResult.GetValueForOption(_goalOption);
+            var fix = context.ParseResult.GetValueForOption(fixOption);
+
+            if (fix)
+            {
+                var fixResult = await Execute(context, "utep diagnose", async () =>
+                {
+                    return await WithGoal(context, goalId, snapshot =>
+                    {
+                        var issues = _services.ValidationService.Validate(snapshot, RequireRepoRoot(context)!);
+                        var doctorResult = _services.DoctorService.ApplyFixes(snapshot, new RepoPaths(RequireRepoRoot(context)!), issues, true);
+
+                        return new CommandResult<DoctorResult>
+                        {
+                            Ok = doctorResult.Summary.ErrorsAfter == 0,
+                            GoalId = snapshot.Goal.Goal.Id,
+                            Result = doctorResult,
+                            ExitCode = doctorResult.Summary.ErrorsAfter == 0 ? ExitCodes.Success : ExitCodes.ValidationError,
+                            Errors = doctorResult.RemainingIssues.Where(issue => issue.Severity == "error").ToList()
+                        };
+                    });
+                });
+
+                WriteResult(context, fixResult);
+                return;
+            }
+
+            var result = await Execute(context, "utep diagnose", async () =>
+            {
+                return await WithGoal(context, goalId, snapshot =>
+                {
+                    var issues = _services.ValidationService.Validate(snapshot, RequireRepoRoot(context)!);
+                    var summary = new ValidateSummary
+                    {
+                        Errors = issues.Count(issue => issue.Severity == "error"),
+                        Warnings = issues.Count(issue => issue.Severity == "warning")
+                    };
+
+                    return new CommandResult<ValidateResult>
+                    {
+                        Ok = summary.Errors == 0,
+                        GoalId = snapshot.Goal.Goal.Id,
+                        Result = new ValidateResult
+                        {
+                            Summary = summary,
+                            Issues = issues
+                        },
+                        ExitCode = summary.Errors == 0 ? ExitCodes.Success : ExitCodes.ValidationError,
+                        Errors = issues.Where(issue => issue.Severity == "error").ToList(),
+                        Warnings = issues.Where(issue => issue.Severity == "warning").ToList()
                     };
                 });
             });
@@ -1418,88 +1694,62 @@ public sealed class CommandFactory
         return result;
     }
 
-    private NextBlocking BuildBlocking(TaskSnapshot snapshot, Dictionary<string, int> depths, Dictionary<string, int> blocksCount)
+    private static bool TryParseQuestionOptions(
+        string[] inputs,
+        out List<QuestionOption> options,
+        out string? error)
     {
-        var computedBuilder = _services.ComputedBuilder;
+        options = new List<QuestionOption>();
+        error = null;
 
-        var blockedTask = snapshot.Tasks.Values
-            .Select(info => new
-            {
-                Task = info,
-                Computed = computedBuilder.Build(info.File, snapshot.Tasks, blocksCount)
-            })
-            .Where(item => item.Computed.EffectiveState == "Question" && item.Task.File.Task.OpenQuestions.Count > 0)
-            .OrderBy(item => depths.TryGetValue(item.Task.File.Task.Id, out var depth) ? depth : 0)
-            .ThenBy(item => item.Task.File.Task.Priority)
-            .ThenBy(item => item.Task.File.Task.Id, StringComparer.OrdinalIgnoreCase)
-            .FirstOrDefault();
-
-        if (blockedTask != null)
+        foreach (var input in inputs)
         {
-            var openQuestion = blockedTask.Task.File.Task.OpenQuestions.First();
-            return new NextBlocking
+            if (string.IsNullOrWhiteSpace(input))
             {
-                Kind = "question",
-                QuestionTask = new QuestionTaskInfo
-                {
-                    Task = new TaskRef
-                    {
-                        TaskId = blockedTask.Task.File.Task.Id,
-                        Title = blockedTask.Task.File.Task.Title,
-                        Status = blockedTask.Task.File.Task.Status,
-                        Priority = blockedTask.Task.File.Task.Priority,
-                        Depth = depths.TryGetValue(blockedTask.Task.File.Task.Id, out var depth) ? depth : 0,
-                        File = blockedTask.Task.Path.Replace('\\', '/')
-                    },
-                    Computed = blockedTask.Computed
-                },
-                Question = new OpenQuestionInfo
-                {
-                    TaskId = blockedTask.Task.File.Task.Id,
-                    OpenQuestionId = openQuestion.Id,
-                    Kind = openQuestion.Kind,
-                    Question = openQuestion.Question,
-                    Options = openQuestion.Options.Select(option => new QuestionOptionShort
-                    {
-                        Id = option.Id,
-                        Title = option.Title
-                    }).ToList(),
-                    Recommendation = openQuestion.Recommendation,
-                    RequestedAnswer = openQuestion.RequestedAnswer
-                }
-            };
+                error = "Question option is empty";
+                return false;
+            }
+
+            var parts = input.Split(':', 2, StringSplitOptions.TrimEntries);
+            if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]))
+            {
+                error = "Invalid option format, expected <id>:<title>";
+                return false;
+            }
+
+            options.Add(new QuestionOption
+            {
+                Id = parts[0],
+                Title = parts[1],
+                Pros = new List<string>(),
+                Cons = new List<string>(),
+                Risks = new List<string>()
+            });
         }
 
-        var bottlenecks = _services.BottleneckAnalyzer.GetTop(snapshot.Tasks, depths, blocksCount, 1, computedBuilder);
-        var top = bottlenecks.FirstOrDefault();
-        var blockedExamples = snapshot.Tasks.Values
-            .Select(info => new
-            {
-                info.File.Task.Id,
-                Computed = computedBuilder.Build(info.File, snapshot.Tasks, blocksCount)
-            })
-            .Where(item => item.Computed.EffectiveState == "Blocked")
-            .Select(item => new BlockedExample
-            {
-                TaskId = item.Id,
-                BlockedOn = item.Computed.BlockedBy
-            })
-            .Take(5)
-            .ToList();
+        return true;
+    }
 
-        return new NextBlocking
+    private static string NextQuestionId(IReadOnlyList<OpenQuestion> questions)
+    {
+        var next = 1;
+        foreach (var question in questions)
         {
-            Kind = "blocked",
-            RecommendedBlocker = top == null
-                ? null
-                : new RecommendedBlocker
-                {
-                    Task = top.Task,
-                    Computed = computedBuilder.Build(snapshot.Tasks[top.Task.TaskId].File, snapshot.Tasks, blocksCount),
-                    BlocksCount = top.BlocksCount
-                },
-            BlockedExamples = blockedExamples
-        };
+            if (question.Id.StartsWith("Q-", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(question.Id.AsSpan(2), out var number))
+            {
+                next = Math.Max(next, number + 1);
+            }
+        }
+
+        var candidate = $"Q-{next:00}";
+        while (questions.Any(question => string.Equals(question.Id, candidate, StringComparison.OrdinalIgnoreCase)))
+        {
+            next += 1;
+            candidate = $"Q-{next:00}";
+        }
+
+        return candidate;
     }
 
     private string? RequireRepoRoot(InvocationContext context)
@@ -1663,8 +1913,9 @@ public sealed class CommandFactory
         return status is TaskStatus.Ready or TaskStatus.InProgress or TaskStatus.Completed;
     }
 
-    private static CommandResult<T> MissingSuccessCriteria<T>(string taskId)
+    private static CommandResult<T> MissingSuccessCriteria<T>(string taskId, TaskStatus status)
     {
+        var hint = $"utep task set-status {taskId} {status} --success \"...\"";
         return new CommandResult<T>
         {
             Ok = false,
@@ -1674,7 +1925,51 @@ public sealed class CommandFactory
                 {
                     Code = "E006",
                     Severity = "error",
-                    Message = "Missing success_criteria for actionable status",
+                    Message = $"Missing success_criteria for actionable status. Use: {hint}",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["task_id"] = taskId
+                    }
+                }
+            },
+            ExitCode = ExitCodes.ValidationError
+        };
+    }
+
+    private static CommandResult<T> MissingEvidence<T>(string taskId)
+    {
+        return new CommandResult<T>
+        {
+            Ok = false,
+            Errors = new List<ValidationIssue>
+            {
+                new ValidationIssue
+                {
+                    Code = "E005",
+                    Severity = "error",
+                    Message = "Missing evidence for task action",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["task_id"] = taskId
+                    }
+                }
+            },
+            ExitCode = ExitCodes.ValidationError
+        };
+    }
+
+    private static CommandResult<T> InvalidQuestionAnswer<T>(string taskId, string message)
+    {
+        return new CommandResult<T>
+        {
+            Ok = false,
+            Errors = new List<ValidationIssue>
+            {
+                new ValidationIssue
+                {
+                    Code = "E431",
+                    Severity = "error",
+                    Message = message,
                     Details = new Dictionary<string, object>
                     {
                         ["task_id"] = taskId

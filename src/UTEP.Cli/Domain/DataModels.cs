@@ -197,6 +197,9 @@ public sealed class OpenQuestion
     public string RequestedAnswer { get; set; } = string.Empty;
 
     [JsonPropertyOrder(7)]
+    public string? Answer { get; set; }
+
+    [JsonPropertyOrder(8)]
     public string CreatedAt { get; set; } = string.Empty;
 }
 

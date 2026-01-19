@@ -293,6 +293,39 @@ public sealed class TaskBlockResult
     public bool Rendered { get; set; }
 }
 
+public sealed class TaskQuestionResult
+{
+    [JsonPropertyOrder(1)]
+    public string TaskId { get; set; } = string.Empty;
+
+    [JsonPropertyOrder(2)]
+    public TaskStatus From { get; set; }
+
+    [JsonPropertyOrder(3)]
+    public TaskStatus To { get; set; }
+
+    [JsonPropertyOrder(4)]
+    public string OpenQuestionId { get; set; } = string.Empty;
+
+    [JsonPropertyOrder(5)]
+    public bool Rendered { get; set; }
+}
+
+public sealed class TaskAnswerResult
+{
+    [JsonPropertyOrder(1)]
+    public string TaskId { get; set; } = string.Empty;
+
+    [JsonPropertyOrder(2)]
+    public string OpenQuestionId { get; set; } = string.Empty;
+
+    [JsonPropertyOrder(3)]
+    public string Answer { get; set; } = string.Empty;
+
+    [JsonPropertyOrder(4)]
+    public bool Rendered { get; set; }
+}
+
 public sealed class QuestionImported
 {
     [JsonPropertyOrder(1)]
@@ -338,6 +371,9 @@ public sealed class NextResult
     public List<ActionableItem> Actionable { get; set; } = new();
 
     [JsonPropertyOrder(2)]
+    public string? Reason { get; set; }
+
+    [JsonPropertyOrder(3)]
     public NextBlocking? Blocking { get; set; }
 }
 

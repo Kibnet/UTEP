@@ -21,9 +21,10 @@
 2. если есть actionable:
      выбрать первую
    иначе:
-     если Question → задать вопрос и остановиться
-     если Blocked → взять блокер
-     если ничего → остановиться
+     если reason == "question" → utep goal tree --json, найти задачу с `Question`,
+       затем utep task show <id> --json, задать вопрос и остановиться
+     если reason == "blocked" → utep bottlenecks --top 5 --json, взять лучший блокер
+     если reason == "none" → остановиться
 3. utep task show <id> --json
 4. Проверка актуальности
      если неактуально → invalidate
@@ -33,7 +34,7 @@
 8. Если success_criteria выполнены:
      utep task complete <id>
 9. utep render
-10. utep validate
+10. utep diagnose
 11. перейти к шагу 1
 ```
 
@@ -44,9 +45,12 @@
 Если невозможно продолжать без решения пользователя:
 
 1. Сформировать вопрос **с вариантами**
-2. Сохранить вопрос через `utep task block`
+2. Сохранить вопрос через `utep task question`
 3. Вывести вопрос пользователю
-4. Остановиться до ответа
+4. После ответа зафиксировать через `utep task answer`
+5. Проверить, уменьшает ли ответ неопределённость и понятно ли, что делать дальше
+6. Если нет — добавить уточняющие вопросы через `utep task question`
+7. Остановиться до ответа
 
 ---
 
@@ -74,7 +78,7 @@
 ## Обязательные поля
 
 * `success_criteria` — задавать при `utep task new --success ...` или при `utep task set-status ... --success ...`
-* `open_questions` — только через `utep task block --question-file ...` (статус `Question`)
+* `open_questions` — только через `utep task question ...`, ответ через `utep task answer ...` (статус `Question`)
 * `dependencies.blocked_by` — через `utep task dep add|rm ...`, пустой список допустим
 
 ---

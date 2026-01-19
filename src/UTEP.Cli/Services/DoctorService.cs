@@ -1,4 +1,4 @@
-using UTEP.Cli.Domain;
+﻿using UTEP.Cli.Domain;
 using UTEP.Cli.IO;
 using TaskStatus = UTEP.Cli.Domain.TaskStatus;
 
@@ -38,7 +38,7 @@ public sealed class DoctorService
                 case "E004":
                     fixedCount += FixMissingEvidence(snapshot, paths, actions, issue);
                     break;
-                case "E005":
+                case "E008":
                     fixedCount += FixMissingQuestion(snapshot, paths, actions, issue);
                     break;
             }
@@ -152,7 +152,7 @@ public sealed class DoctorService
             IssueCode = "E004",
             RemedyId = "R1",
             Applied = true,
-            CommandsExecuted = new List<string> { $"utep task attempt {location.Id} --note \"Add evidence\"" }
+            CommandsExecuted = new List<string> { $"utep task attempt {location.Id} --evidence \"Add evidence\"" }
         });
 
         return 1;
@@ -174,16 +174,20 @@ public sealed class DoctorService
             Options = new List<QuestionOption>(),
             Recommendation = null,
             RequestedAnswer = "Предоставьте ответ",
+            Answer = null,
             CreatedAt = _clock.Now.ToString("o")
         });
         _store.WriteFileAtomic(info.Path, info.File);
 
         actions.Add(new DoctorAction
         {
-            IssueCode = "E005",
+            IssueCode = "E008",
             RemedyId = "R1",
             Applied = true,
-            CommandsExecuted = new List<string> { $"utep task block {location.Id} --question-file questions/{location.Id}.question.json" }
+            CommandsExecuted = new List<string>
+            {
+                $"utep task question {location.Id} --kind process --question \"Нужна дополнительная информация\" --requested-answer \"Предоставьте ответ\""
+            }
         });
 
         return 1;

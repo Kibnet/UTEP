@@ -132,9 +132,13 @@ UTEP **не является таск-менеджером**.
   "options": [{"id":"O-1","title":"...","pros":[],"cons":[],"risks":[]}],
   "recommendation": "O-2",
   "requested_answer": "...",
+  "answer": null,
   "created_at": "..."
 }
 ```
+
+`answer` опционален и хранит выбранный `option.id` или текст ответа.
+Ответ не переводит задачу из статуса `Question` автоматически.
 
 ### 4.5 utep.log.ndjson
 
@@ -194,9 +198,12 @@ CLI вычисляет:
 
 **Если кандидатов нет:**
 
-* `Question` → вернуть вопрос пользователю
-* `Blocked` → вернуть главный блокер
+* `reason == "question"` → агент должен найти вопрос через дерево цели
+* `reason == "blocked"` → агент работает с блокерами
+* `reason == "none"` → остановиться
 * exit code `5`
+
+**После получения ответа:** агент обязан проверить, уменьшает ли ответ неопределённость и стало ли понятно, что делать дальше. Если нет — сформировать уточняющие вопросы.
 
 ---
 
@@ -227,13 +234,14 @@ CLI вычисляет:
 
 * `utep init`
 * `utep goal new|open|status|tree`
-* `utep task new|show|set-status|start|attempt|complete|invalidate|cancel|block`
+* `utep task new|show|set-status|start|attempt|complete|invalidate|cancel|block|question|answer`
 * `utep task dep add|rm`
 * `utep task deps`
 * `utep next`
 * `utep bottlenecks`
 * `utep validate`
 * `utep doctor [--fix]`
+* `utep diagnose [--fix]`
 * `utep render`
 
 Все JSON‑форматы команд соответствуют `UTEP-SCHEMA.md`.
@@ -254,6 +262,10 @@ CLI вычисляет:
 * может исправлять автоматически (`--fix`)
 
 **Минимальные ошибки:** E001–E009 (см. `UTEP-SCHEMA.md`).
+
+### `utep diagnose`
+
+* единая команда: без `--fix` = `validate`, с `--fix` = `doctor --fix`
 
 ---
 

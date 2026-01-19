@@ -10,6 +10,7 @@
 
    * `utep validate` → сообщает
    * `utep doctor` → предлагает/делает фикс, или переводит в degraded mode
+   * `utep diagnose` → единая точка входа (`validate` или `doctor --fix`)
 6. Зависимости **без политик**: `blocked_by: string[]`.
 
    * “что делать, если блокер отменили” решает актуальность + auto `needs_review`.
@@ -135,9 +136,12 @@
   ],
   "recommendation": "O-2",
   "requested_answer": "Выберите O-1 или O-2",
+  "answer": null,
   "created_at": "2026-01-15T01:10:00-05:00"
 }
 ```
+
+`answer` опционален: хранит выбранный `option.id` или текстовый ответ.
 
 ## 2.4 `utep.log.ndjson` (события)
 
@@ -184,10 +188,10 @@
 Если список пуст:
 
 * exit code `5`
-* возвращает structured explanation:
-
-* если есть `Question` с вопросами на верхнем уровне → “Question”
-  * иначе “Blocked” с рекомендацией “какие задачи завершить” (top bottleneck)
+* возвращает `reason` без списка блокеров:
+  * `question` если есть `Question` с вопросами
+  * `blocked` если есть блокировки
+  * `none` если нет ни actionable, ни блокировок
 
 **Пример `--json` ответа, когда пусто:**
 
@@ -195,17 +199,7 @@
 {
   "goal_id": "G-2026-001",
   "actionable": [],
-  "blocking": {
-    "kind": "blocked",
-    "recommended_blocker": {
-      "task_id": "T-005",
-      "title": "Выбрать архитектуру",
-      "blocks_count": 6
-    },
-    "blocked_examples": [
-      {"task_id": "T-010", "blocked_on": ["T-005"]}
-    ]
-  }
+  "reason": "blocked"
 }
 ```
 
@@ -237,6 +231,11 @@
   * даёт список “remedies”
   * если `--fix` и remedy автоматизируем — применяет
 * если есть неустранимые автоматически — предлагает пошаговый план
+
+## 5.3 `utep diagnose [--goal ...] [--fix] [--json]`
+
+* без `--fix` ведет себя как `utep validate`
+* с `--fix` ведет себя как `utep doctor --fix`
 
 ### Типы ошибок и remedies (минимум)
 
@@ -314,17 +313,18 @@
 1) `utep next --count 5 --json`
    - if actionable not empty -> pick first
    - else:
-       - if blocking.kind == "question": ask user the stored question and stop
-       - if blocking.kind == "blocked": run `utep bottlenecks --top 5 --json`,
+       - if reason == "question": run `utep goal tree --json`, find task with `effective_state == "Question"`,
+         then `utep task show <id> --json` and ask the user
+       - if reason == "blocked": run `utep bottlenecks --top 5 --json`,
          pick the best blocker task (if any is actionable) and work on it
-       - if nothing actionable at all: stop and report
+       - if reason == "none": stop and report
 
 2) `utep task show <id> --json`
 3) Relevance check -> invalidate if needed
 4) `utep task start <id>`
 5) work + `utep task attempt ...`
 6) complete or block with options via CLI
-7) `utep render` + `utep validate`
+7) `utep render` + `utep diagnose`
 ```
 
 ---
@@ -709,7 +709,7 @@ CLI всегда пишет:
 
 ---
 
-## 2.10 `utep task attempt <id> --note ... [--minutes N] [--evidence-file]`
+## 2.10 `utep task attempt <id> --evidence ... [--minutes N] [--evidence-file] [--note]`
 
 **result:**
 
@@ -727,7 +727,7 @@ CLI всегда пишет:
 
 ---
 
-## 2.11 `utep task complete <id> --evidence ...`
+## 2.11 `utep task complete <id> --evidence ... [--evidence-file]`
 
 **result:**
 
@@ -791,6 +791,42 @@ CLI всегда пишет:
 
 ---
 
+## 2.13a `utep task question <id> --kind ... --question ... --requested-answer ... [--option <id:title>] [--recommendation <id>]`
+
+**result:**
+
+```json
+{
+  "task_id": "T-010",
+  "from": "InProgress",
+  "to": "Question",
+  "open_question_id": "Q-01",
+  "rendered": true
+}
+```
+
+Формат `--option`: `O-1:Краткий заголовок`.
+
+---
+
+## 2.13b `utep task answer <id> --option <O-1>`
+
+**result:**
+
+```json
+{
+  "task_id": "T-010",
+  "open_question_id": "Q-01",
+  "answer": "O-1",
+  "rendered": false
+}
+```
+
+Для вопросов без опций использовать `--text`.
+Статус задачи не меняется автоматически.
+
+---
+
 ## 2.14 `utep task dep add|rm <id> --blocked-by <id>`
 
 **result:**
@@ -828,7 +864,7 @@ CLI всегда пишет:
       }
     }
   ],
-  "blocking": null
+  "reason": null
 }
 ```
 
@@ -839,41 +875,7 @@ CLI всегда пишет:
 ```json
 {
   "actionable": [],
-  "blocking": {
-    "kind": "question",
-    "question_task": {
-      "task": { "...TaskRef..." },
-      "computed": { "effective_state":"Question", "...": "..." }
-    },
-    "question": {
-      "task_id": "T-002",
-      "open_question_id": "Q-01",
-      "kind": "architectural",
-      "question": "...",
-      "options": [{"id":"O-1","title":"..."},{"id":"O-2","title":"..."}],
-      "recommendation": "O-2",
-      "requested_answer": "..."
-    }
-  }
-}
-```
-
-Или `kind:"blocked"`:
-
-```json
-{
-  "actionable": [],
-  "blocking": {
-    "kind": "blocked",
-    "recommended_blocker": {
-      "task": { "...TaskRef..." },
-      "computed": { "...TaskComputed..." },
-      "blocks_count": 6
-    },
-    "blocked_examples": [
-      {"task_id":"T-010","blocked_on":["T-005"]}
-    ]
-  }
+  "reason": "question"
 }
 ```
 
@@ -941,6 +943,13 @@ Exit code: `5`.
 
 ---
 
+## 2.18a `utep diagnose [--fix]`
+
+* без `--fix` возвращает `ValidateResult`
+* с `--fix` возвращает `DoctorResult`
+
+---
+
 ## 2.19 `utep render`
 
 **result:**
@@ -968,8 +977,10 @@ Exit code: `5`.
 
 * `E400 InvalidTransition` (exit 4)
 * `E410 NotActionable` (trying start when waiting deps/user) (exit 4)
+* `E005 MissingEvidence` (exit 2)
 * `E006 MissingSuccessCriteria` (exit 2)
 * `E430 QuestionParseError` (exit 2)
+* `E431 InvalidQuestionAnswer` (exit 2)
 * `E440 NotFound` (task/goal) (exit 3)
 * `E450 RepoNotInitialized` (exit 3)
 
