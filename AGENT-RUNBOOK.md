@@ -33,7 +33,7 @@
 7. utep task attempt <id>
 8. Если success_criteria выполнены:
      utep task complete <id>
-9. utep render
+9. index.md обновляется автоматически; при необходимости `utep render` или `utep report`
 10. utep diagnose
 11. перейти к шагу 1
 ```

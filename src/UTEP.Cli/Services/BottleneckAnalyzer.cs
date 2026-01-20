@@ -1,4 +1,5 @@
 using UTEP.Cli.Domain;
+using TaskStatus = UTEP.Cli.Domain.TaskStatus;
 
 namespace UTEP.Cli.Services;
 
@@ -14,6 +15,11 @@ public sealed class BottleneckAnalyzer
         var items = new List<BottleneckItem>();
         foreach (var (taskId, info) in tasks)
         {
+            if (info.File.Task.Status is TaskStatus.Completed or TaskStatus.Cancelled or TaskStatus.Invalidated)
+            {
+                continue;
+            }
+
             if (!blocksCount.TryGetValue(taskId, out var count) || count == 0)
             {
                 continue;

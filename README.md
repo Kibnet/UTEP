@@ -39,8 +39,10 @@ utep goal open G-XXXX
 
 ```bash
 utep task new --title "Подготовить требования" --status Ready
-utep render
+# index.md обновляется автоматически после изменений
 ```
+
+Время выполнения фиксируется автоматически между `task start` и `task attempt`/`task complete`; при необходимости можно задать `--minutes` вручную.
 
 Дальше работает агент.
 
@@ -66,6 +68,7 @@ utep render
 utep goal status
 utep goal tree
 utep bottlenecks
+utep report
 ```
 
 ---

@@ -158,6 +158,9 @@ public sealed class TaskData
     public int TimeSpentMinutes { get; set; }
 
     [JsonPropertyOrder(16)]
+    public string? ActiveAttemptStartedAt { get; set; }
+
+    [JsonPropertyOrder(17)]
     public List<Evidence> Evidence { get; set; } = new();
 }
 

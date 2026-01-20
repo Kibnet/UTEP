@@ -33,4 +33,35 @@ public static class StatusRules
     {
         return AllowedTransitions.TryGetValue(from, out var allowed) && allowed.Contains(to);
     }
+
+    public static GoalStatus ComputeGoalStatus(IReadOnlyDictionary<string, TaskInfo> tasks)
+    {
+        if (tasks.Count == 0)
+        {
+            return GoalStatus.Planned;
+        }
+
+        var statuses = tasks.Values.Select(info => info.File.Task.Status).ToList();
+        if (statuses.All(status => status is TaskStatus.Completed or TaskStatus.Cancelled or TaskStatus.Invalidated))
+        {
+            return GoalStatus.Completed;
+        }
+
+        if (statuses.Contains(TaskStatus.InProgress))
+        {
+            return GoalStatus.InProgress;
+        }
+
+        if (statuses.Contains(TaskStatus.Question))
+        {
+            return GoalStatus.Question;
+        }
+
+        if (statuses.Contains(TaskStatus.Ready))
+        {
+            return GoalStatus.Ready;
+        }
+
+        return GoalStatus.Planned;
+    }
 }

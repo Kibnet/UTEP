@@ -24,7 +24,7 @@ UTEP **не является таск-менеджером**.
 4. **`next` возвращает только выполнимое сейчас (Actionable).**
 5. **Любая ошибка валидации должна иметь путь разрешения** (`doctor`).
 6. **Дерево задач — для смысла, зависимости — для порядка.**
-7. **View (`index.md`) генерируется CLI.**
+7. **View (`index.md`) генерируется CLI и обновляется автоматически после изменений.**
 8. **Degraded mode:** `next`/`render` работают даже при частичной невалидности.
 
 ---
@@ -95,6 +95,8 @@ UTEP **не является таск-менеджером**.
 }
 ```
 
+`goal.status` обновляется CLI на основе состояния задач.
+
 ### 4.3 task.json
 
 ```json
@@ -116,11 +118,14 @@ UTEP **не является таск-менеджером**.
     "open_questions": [],
     "attempts": 0,
     "time_spent_minutes": 0,
+    "active_attempt_started_at": null,
     "evidence": []
   },
   "links": { "artifacts_dir": "../artifacts/" }
 }
 ```
+
+`active_attempt_started_at` фиксирует начало текущей сессии. Если `--minutes` не указан, `task attempt`/`task complete` рассчитывают `time_spent_minutes` по разнице между `active_attempt_started_at` и текущим временем.
 
 ### 4.4 open_questions[]
 
@@ -243,6 +248,7 @@ CLI вычисляет:
 * `utep doctor [--fix]`
 * `utep diagnose [--fix]`
 * `utep render`
+* `utep report`
 
 Все JSON‑форматы команд соответствуют `UTEP-SCHEMA.md`.
 
@@ -271,12 +277,13 @@ CLI вычисляет:
 
 ## 11. View (index.md)
 
-* генерируется CLI
+* генерируется CLI и обновляется автоматически после изменяющих команд
 * дерево задач + маркеры:
   * `⛔ deps: ...`
   * `⚠ review`
   * `🟥 Question`
 * отдельные секции `Bottlenecks` и `Blocked`
+* `utep report` генерирует расширенный отчет `report.md`
 
 ---
 

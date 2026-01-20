@@ -87,6 +87,8 @@
 }
 ```
 
+`goal.status` обновляется CLI на основе состояния задач.
+
 ## 2.3 `T-xxx.task.json`
 
 ```json
@@ -115,6 +117,7 @@
     "open_questions": [],
     "attempts": 0,
     "time_spent_minutes": 0,
+    "active_attempt_started_at": null,
     "evidence": []
   },
   "links": {
@@ -122,6 +125,8 @@
   }
 }
 ```
+
+`active_attempt_started_at` используется для авто‑расчета `time_spent_minutes`, если `--minutes` не указан.
 
 ### `open_questions[]` (структурный объект)
 
@@ -270,7 +275,12 @@
    Remedies:
 
    * явно задать пустой список blocked_by
-8. `E009 InvalidStatusTransitionDetectedInLog` (если используешь восстановление)
+8. `E012 MissingActiveAttemptSession`
+   Remedies:
+
+   * `utep task start <id>`
+   * `utep task attempt <id> --minutes N --evidence "..."`
+9. `E009 InvalidStatusTransitionDetectedInLog` (если используешь восстановление)
    Remedies:
 
    * “replay from snapshot” / “ignore log”
@@ -324,7 +334,7 @@
 4) `utep task start <id>`
 5) work + `utep task attempt ...`
 6) complete or block with options via CLI
-7) `utep render` + `utep diagnose`
+7) `index.md` обновляется автоматически; при необходимости `utep render` или `utep report`, затем `utep diagnose`
 ```
 
 ---
@@ -648,6 +658,7 @@ CLI всегда пишет:
       "open_questions": [],
       "attempts": 1,
       "time_spent_minutes": 30,
+      "active_attempt_started_at": null,
       "evidence": [{"kind":"note","text":"...","at":"..."}]
     },
     "links": { "artifacts_dir": "../artifacts/" }
@@ -711,6 +722,8 @@ CLI всегда пишет:
 
 ## 2.10 `utep task attempt <id> --evidence ... [--minutes N] [--evidence-file] [--note]`
 
+Если `--minutes` не указан, CLI рассчитывает длительность по `active_attempt_started_at`.
+
 **result:**
 
 ```json
@@ -727,7 +740,9 @@ CLI всегда пишет:
 
 ---
 
-## 2.11 `utep task complete <id> --evidence ... [--evidence-file]`
+## 2.11 `utep task complete <id> --evidence ... [--evidence-file] [--minutes N]`
+
+Опционально поддерживается `--minutes N`. Если `--minutes` не указан, CLI использует `active_attempt_started_at`.
 
 **result:**
 
@@ -941,6 +956,8 @@ Exit code: `5`.
 }
 ```
 
+Терминальные задачи (`Completed`, `Cancelled`, `Invalidated`) в выборку bottlenecks не попадают.
+
 ---
 
 ## 2.18a `utep diagnose [--fix]`
@@ -965,6 +982,21 @@ Exit code: `5`.
 
 ---
 
+## 2.20 `utep report`
+
+**result:**
+
+```json
+{
+  "rendered": true,
+  "files": [
+    "goals/G-2026-001/report.md"
+  ]
+}
+```
+
+---
+
 # 3) Ошибки выполнения (execution errors) и их JSON
 
 Все “ошибки” возвращаются в envelope:
@@ -981,6 +1013,7 @@ Exit code: `5`.
 * `E006 MissingSuccessCriteria` (exit 2)
 * `E430 QuestionParseError` (exit 2)
 * `E431 InvalidQuestionAnswer` (exit 2)
+* `E012 MissingActiveAttemptSession` (exit 2)
 * `E440 NotFound` (task/goal) (exit 3)
 * `E450 RepoNotInitialized` (exit 3)
 

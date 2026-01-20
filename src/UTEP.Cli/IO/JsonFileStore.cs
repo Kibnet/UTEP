@@ -34,7 +34,7 @@ public sealed class JsonFileStore
         }
 
         var tempPath = path + ".tmp";
-        File.WriteAllText(tempPath, json);
+        File.WriteAllText(tempPath, json, JsonDefaults.Utf8NoBom);
         File.Move(tempPath, path, true);
     }
 }

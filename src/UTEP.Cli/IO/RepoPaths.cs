@@ -29,4 +29,7 @@ public sealed class RepoPaths
 
     public string IndexFile(string goalId, string indexFilename) =>
         Path.Combine(GoalDir(goalId), indexFilename);
+
+    public string ReportFile(string goalId) =>
+        Path.Combine(GoalDir(goalId), "report.md");
 }

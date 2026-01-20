@@ -63,6 +63,6 @@ public sealed class LogWriter
             Directory.CreateDirectory(directory);
         }
 
-        File.AppendAllText(logFile, json);
+        File.AppendAllText(logFile, json, JsonDefaults.Utf8NoBom);
     }
 }

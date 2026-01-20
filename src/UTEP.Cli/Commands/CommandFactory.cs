@@ -1,5 +1,6 @@
 ﻿using System.CommandLine;
 using System.CommandLine.Invocation;
+using System.Globalization;
 using Spectre.Console;
 using UTEP.Cli.Domain;
 using UTEP.Cli.IO;
@@ -36,7 +37,8 @@ public sealed class CommandFactory
             BuildValidate(),
             BuildDoctor(),
             BuildDiagnose(),
-            BuildRender()
+            BuildRender(),
+            BuildReport()
         };
     }
 
@@ -128,8 +130,14 @@ public sealed class CommandFactory
                 };
 
                 _services.Store.WriteFileAtomic(paths.GoalFile(goalId), goalFile);
-                File.WriteAllText(paths.LogFile(goalId), string.Empty);
-                File.WriteAllText(paths.IndexFile(goalId, DefaultConfig().Render.IndexFilename), string.Empty);
+                File.WriteAllText(paths.LogFile(goalId), string.Empty, JsonDefaults.Utf8NoBom);
+                File.WriteAllText(paths.IndexFile(goalId, DefaultConfig().Render.IndexFilename), string.Empty, JsonDefaults.Utf8NoBom);
+                var issues = new List<ValidationIssue>();
+                var snapshot = _services.RepositoryLoader.Load(paths, goalId, issues);
+                if (issues.Count == 0)
+                {
+                    ApplyPostMutation(context, snapshot);
+                }
 
                 return Task.FromResult(new CommandResult<GoalNewResult>
                 {
@@ -378,6 +386,7 @@ public sealed class CommandFactory
                             OpenQuestions = new List<OpenQuestion>(),
                             Attempts = 0,
                             TimeSpentMinutes = 0,
+                            ActiveAttemptStartedAt = null,
                             Evidence = new List<Evidence>()
                         },
                         Links = new TaskLinks()
@@ -385,6 +394,8 @@ public sealed class CommandFactory
 
                     var filePath = Path.Combine(paths.TasksDir(snapshot.Goal.Goal.Id), $"{taskId}.task.json");
                     _services.Store.WriteFileAtomic(filePath, taskFile);
+                    snapshot.Tasks[taskId] = new TaskInfo(taskFile, filePath);
+                    ApplyPostMutation(context, snapshot);
 
                     return new CommandResult<TaskNewResult>
                     {
@@ -520,6 +531,7 @@ public sealed class CommandFactory
                         from,
                         statusValue,
                         note);
+                    var rendered = ApplyPostMutation(context, snapshot);
 
                     return new CommandResult<TaskSetStatusResult>
                     {
@@ -532,7 +544,7 @@ public sealed class CommandFactory
                             To = statusValue,
                             Note = note,
                             LogEventId = logId,
-                            Rendered = false
+                            Rendered = rendered
                         },
                         ExitCode = ExitCodes.Success
                     };
@@ -577,7 +589,9 @@ public sealed class CommandFactory
                         return MissingSuccessCriteria<TaskStartResult>(taskId, TaskStatus.InProgress);
                     }
 
+                    var startedAt = _services.Clock.Now;
                     info.File.Task.Status = TaskStatus.InProgress;
+                    info.File.Task.ActiveAttemptStartedAt = startedAt.ToString("o");
                     _services.Store.WriteFileAtomic(info.Path, info.File);
                     _services.LogWriter.AppendStatusChange(
                         new RepoPaths(RequireRepoRoot(context)!).LogFile(snapshot.Goal.Goal.Id),
@@ -586,6 +600,7 @@ public sealed class CommandFactory
                         from,
                         TaskStatus.InProgress,
                         "start");
+                    var rendered = ApplyPostMutation(context, snapshot);
 
                     return new CommandResult<TaskStartResult>
                     {
@@ -598,10 +613,10 @@ public sealed class CommandFactory
                             To = TaskStatus.InProgress,
                             AttemptSession = new AttemptSession
                             {
-                                StartedAt = _services.Clock.Now.ToString("o"),
+                                StartedAt = startedAt.ToString("o"),
                                 AttemptsBefore = info.File.Task.Attempts
                             },
-                            Rendered = false
+                            Rendered = rendered
                         },
                         ExitCode = ExitCodes.Success
                     };
@@ -656,17 +671,41 @@ public sealed class CommandFactory
                     var beforeAttempts = info.File.Task.Attempts;
                     var beforeMinutes = info.File.Task.TimeSpentMinutes;
 
-                    info.File.Task.Attempts += 1;
+                    var now = _services.Clock.Now;
+                    var addedMinutes = 0;
                     if (minutes.HasValue)
                     {
-                        info.File.Task.TimeSpentMinutes += minutes.Value;
+                        addedMinutes = minutes.Value;
                     }
+                    else
+                    {
+                        if (string.IsNullOrWhiteSpace(info.File.Task.ActiveAttemptStartedAt)
+                            || !DateTimeOffset.TryParse(
+                                info.File.Task.ActiveAttemptStartedAt,
+                                CultureInfo.InvariantCulture,
+                                DateTimeStyles.RoundtripKind,
+                                out var startedAt))
+                        {
+                            return MissingActiveAttemptSession<TaskAttemptResult>(taskId);
+                        }
+
+                        var delta = now - startedAt;
+                        addedMinutes = (int)Math.Ceiling(delta.TotalMinutes);
+                        if (addedMinutes < 1)
+                        {
+                            addedMinutes = 1;
+                        }
+                    }
+
+                    info.File.Task.Attempts += 1;
+                    info.File.Task.TimeSpentMinutes += addedMinutes;
+                    info.File.Task.ActiveAttemptStartedAt = null;
 
                     var evidence = new Evidence
                     {
                         Kind = "note",
                         Text = evidenceContent,
-                        At = _services.Clock.Now.ToString("o")
+                        At = now.ToString("o")
                     };
 
                     info.File.Task.Evidence.Add(evidence);
@@ -677,6 +716,7 @@ public sealed class CommandFactory
                         snapshot.Goal.Goal.Id,
                         taskId,
                         evidenceContent);
+                    var rendered = ApplyPostMutation(context, snapshot);
 
                     return new CommandResult<TaskAttemptResult>
                     {
@@ -688,7 +728,7 @@ public sealed class CommandFactory
                             Attempts = new AttemptCount { Before = beforeAttempts, After = info.File.Task.Attempts },
                             TimeSpentMinutes = new TimeSpent { Before = beforeMinutes, After = info.File.Task.TimeSpentMinutes },
                             EvidenceAdded = new List<Evidence> { evidence },
-                            Rendered = false
+                            Rendered = rendered
                         },
                         ExitCode = ExitCodes.Success
                     };
@@ -701,15 +741,18 @@ public sealed class CommandFactory
         var complete = new Command("complete", "Завершить задачу.");
         var evidenceOption = new Option<string?>("--evidence");
         var evidenceFileOptionComplete = new Option<string?>("--evidence-file");
+        var minutesOptionComplete = new Option<int?>("--minutes");
         complete.AddArgument(taskIdArg);
         complete.AddOption(evidenceOption);
         complete.AddOption(evidenceFileOptionComplete);
+        complete.AddOption(minutesOptionComplete);
         complete.AddOption(_goalOption);
         complete.SetHandler(async (InvocationContext context) =>
         {
             var taskId = context.ParseResult.GetValueForArgument(taskIdArg);
             var evidenceText = context.ParseResult.GetValueForOption(evidenceOption);
             var evidenceFile = context.ParseResult.GetValueForOption(evidenceFileOptionComplete);
+            var minutes = context.ParseResult.GetValueForOption(minutesOptionComplete);
             var goalId = context.ParseResult.GetValueForOption(_goalOption);
 
             var result = await Execute(context, "utep task complete", async () =>
@@ -737,11 +780,40 @@ public sealed class CommandFactory
                         return MissingEvidence<TaskCompleteResult>(taskId);
                     }
 
+                    var now = _services.Clock.Now;
+                    var addedMinutes = 0;
+                    if (minutes.HasValue)
+                    {
+                        addedMinutes = minutes.Value;
+                    }
+                    else
+                    {
+                        if (string.IsNullOrWhiteSpace(info.File.Task.ActiveAttemptStartedAt)
+                            || !DateTimeOffset.TryParse(
+                                info.File.Task.ActiveAttemptStartedAt,
+                                CultureInfo.InvariantCulture,
+                                DateTimeStyles.RoundtripKind,
+                                out var startedAt))
+                        {
+                            return MissingActiveAttemptSession<TaskCompleteResult>(taskId);
+                        }
+
+                        var delta = now - startedAt;
+                        addedMinutes = (int)Math.Ceiling(delta.TotalMinutes);
+                        if (addedMinutes < 1)
+                        {
+                            addedMinutes = 1;
+                        }
+                    }
+
+                    info.File.Task.TimeSpentMinutes += addedMinutes;
+                    info.File.Task.ActiveAttemptStartedAt = null;
+
                     var evidence = new Evidence
                     {
                         Kind = "completion",
                         Text = evidenceContent,
-                        At = _services.Clock.Now.ToString("o")
+                        At = now.ToString("o")
                     };
                     info.File.Task.Evidence.Add(evidence);
 
@@ -762,6 +834,7 @@ public sealed class CommandFactory
                         "complete");
 
                     var parentCheck = RunParentCheck(snapshot, info.File.Task.ParentId);
+                    var rendered = ApplyPostMutation(context, snapshot);
 
                     return new CommandResult<TaskCompleteResult>
                     {
@@ -774,7 +847,7 @@ public sealed class CommandFactory
                             To = TaskStatus.Completed,
                             EvidenceAdded = new List<Evidence> { evidence },
                             ParentCheck = parentCheck,
-                            Rendered = false
+                            Rendered = rendered
                         },
                         ExitCode = ExitCodes.Success
                     };
@@ -862,7 +935,6 @@ public sealed class CommandFactory
                     var from = info.File.Task.Status;
                     info.File.Task.Status = TaskStatus.Question;
                     _services.Store.WriteFileAtomic(info.Path, info.File);
-
                     _services.LogWriter.AppendStatusChange(
                         new RepoPaths(RequireRepoRoot(context)!).LogFile(snapshot.Goal.Goal.Id),
                         snapshot.Goal.Goal.Id,
@@ -870,7 +942,7 @@ public sealed class CommandFactory
                         from,
                         TaskStatus.Question,
                         "block");
-
+                    var rendered = ApplyPostMutation(context, snapshot);
                     return new CommandResult<TaskBlockResult>
                     {
                         Ok = true,
@@ -886,7 +958,7 @@ public sealed class CommandFactory
                                 OpenQuestionId = question.Id,
                                 Kind = question.Kind
                             },
-                            Rendered = false
+                            Rendered = rendered
                         },
                         ExitCode = ExitCodes.Success
                     };
@@ -962,6 +1034,7 @@ public sealed class CommandFactory
                     var from = info.File.Task.Status;
                     info.File.Task.Status = TaskStatus.Question;
                     _services.Store.WriteFileAtomic(info.Path, info.File);
+                    var rendered = ApplyPostMutation(context, snapshot);
                     _services.LogWriter.AppendStatusChange(
                         new RepoPaths(RequireRepoRoot(context)!).LogFile(snapshot.Goal.Goal.Id),
                         snapshot.Goal.Goal.Id,
@@ -980,7 +1053,7 @@ public sealed class CommandFactory
                             From = from,
                             To = TaskStatus.Question,
                             OpenQuestionId = questionId,
-                            Rendered = false
+                            Rendered = rendered
                         },
                         ExitCode = ExitCodes.Success
                     };
@@ -1052,6 +1125,7 @@ public sealed class CommandFactory
 
                     openQuestion.Answer = answerValue;
                     _services.Store.WriteFileAtomic(info.Path, info.File);
+                    var rendered = ApplyPostMutation(context, snapshot);
 
                     return new CommandResult<TaskAnswerResult>
                     {
@@ -1062,7 +1136,7 @@ public sealed class CommandFactory
                             TaskId = taskId,
                             OpenQuestionId = openQuestion.Id,
                             Answer = answerValue,
-                            Rendered = false
+                            Rendered = rendered
                         },
                         ExitCode = ExitCodes.Success
                     };
@@ -1311,6 +1385,10 @@ public sealed class CommandFactory
                 {
                     var issues = _services.ValidationService.Validate(snapshot, RequireRepoRoot(context)!);
                     var doctorResult = _services.DoctorService.ApplyFixes(snapshot, new RepoPaths(RequireRepoRoot(context)!), issues, fix);
+                    if (fix && doctorResult.Summary.Fixed > 0)
+                    {
+                        ApplyPostMutation(context, snapshot);
+                    }
 
                     return new CommandResult<DoctorResult>
                     {
@@ -1348,6 +1426,10 @@ public sealed class CommandFactory
                     {
                         var issues = _services.ValidationService.Validate(snapshot, RequireRepoRoot(context)!);
                         var doctorResult = _services.DoctorService.ApplyFixes(snapshot, new RepoPaths(RequireRepoRoot(context)!), issues, true);
+                        if (doctorResult.Summary.Fixed > 0)
+                        {
+                            ApplyPostMutation(context, snapshot);
+                        }
 
                         return new CommandResult<DoctorResult>
                         {
@@ -1418,6 +1500,38 @@ public sealed class CommandFactory
                         Ok = true,
                         GoalId = snapshot.Goal.Goal.Id,
                         Result = renderResult,
+                        Warnings = issues,
+                        ExitCode = ExitCodes.Success
+                    };
+                });
+            });
+
+            WriteResult(context, result);
+        });
+
+        return command;
+    }
+
+    private Command BuildReport()
+    {
+        var command = new Command("report", "Сгенерировать отчет report.md.");
+        command.AddOption(_goalOption);
+        command.SetHandler(async (InvocationContext context) =>
+        {
+            var goalId = context.ParseResult.GetValueForOption(_goalOption);
+            var result = await Execute(context, "utep report", async () =>
+            {
+                return await WithGoalAllowDegraded(context, goalId, (snapshot, issues) =>
+                {
+                    var repoRoot = RequireRepoRoot(context)!;
+                    var paths = new RepoPaths(repoRoot);
+                    var reportResult = _services.RenderService.RenderReport(snapshot, paths);
+
+                    return new CommandResult<RenderResult>
+                    {
+                        Ok = true,
+                        GoalId = snapshot.Goal.Goal.Id,
+                        Result = reportResult,
                         Warnings = issues,
                         ExitCode = ExitCodes.Success
                     };
@@ -1573,7 +1687,7 @@ public sealed class CommandFactory
             from,
             to,
             reason);
-
+        var rendered = ApplyPostMutation(context, snapshot);
         return new CommandResult<TaskInvalidateResult>
         {
             Ok = true,
@@ -1584,7 +1698,7 @@ public sealed class CommandFactory
                 From = from,
                 To = to,
                 Reason = reason,
-                Rendered = false
+                Rendered = rendered
             },
             ExitCode = ExitCodes.Success
         };
@@ -1635,9 +1749,8 @@ public sealed class CommandFactory
                     };
                 }
             }
-
             _services.Store.WriteFileAtomic(info.Path, info.File);
-
+            var rendered = ApplyPostMutation(context, snapshot);
             return new CommandResult<TaskDepChangeResult>
             {
                 Ok = true,
@@ -1647,7 +1760,7 @@ public sealed class CommandFactory
                     TaskId = taskId,
                     Change = add ? "added" : "removed",
                     BlockedBy = info.File.Task.Dependencies?.BlockedBy ?? new List<string>(),
-                    Rendered = false
+                    Rendered = rendered
                 },
                 ExitCode = ExitCodes.Success
             };
@@ -1785,6 +1898,40 @@ public sealed class CommandFactory
 
         var config = _services.Store.ReadFile<UtepConfig>(paths.ConfigFile, out _);
         return config ?? DefaultConfig();
+    }
+
+    private bool ApplyPostMutation(InvocationContext context, TaskSnapshot snapshot)
+    {
+        var repoRoot = RequireRepoRoot(context)!;
+        UpdateGoalStatusIfNeeded(snapshot, repoRoot);
+        return TryAutoRender(snapshot, repoRoot);
+    }
+
+    private void UpdateGoalStatusIfNeeded(TaskSnapshot snapshot, string repoRoot)
+    {
+        var computed = StatusRules.ComputeGoalStatus(snapshot.Tasks);
+        if (snapshot.Goal.Goal.Status == computed)
+        {
+            return;
+        }
+
+        snapshot.Goal.Goal.Status = computed;
+        snapshot.Goal.Goal.UpdatedAt = _services.Clock.Now.ToString("o");
+        var paths = new RepoPaths(repoRoot);
+        _services.Store.WriteFileAtomic(paths.GoalFile(snapshot.Goal.Goal.Id), snapshot.Goal);
+    }
+
+    private bool TryAutoRender(TaskSnapshot snapshot, string repoRoot)
+    {
+        var config = LoadConfig(repoRoot);
+        if (!config.Render.Index)
+        {
+            return false;
+        }
+
+        var paths = new RepoPaths(repoRoot);
+        _services.RenderService.Render(snapshot, paths, config.Render.IndexFilename);
+        return true;
     }
 
     private static UtepConfig DefaultConfig()
@@ -1951,6 +2098,43 @@ public sealed class CommandFactory
                     Details = new Dictionary<string, object>
                     {
                         ["task_id"] = taskId
+                    }
+                }
+            },
+            ExitCode = ExitCodes.ValidationError
+        };
+    }
+
+    private static CommandResult<T> MissingActiveAttemptSession<T>(string taskId)
+    {
+        return new CommandResult<T>
+        {
+            Ok = false,
+            Errors = new List<ValidationIssue>
+            {
+                new ValidationIssue
+                {
+                    Code = "E012",
+                    Severity = "error",
+                    Message = "Missing active attempt session. Use: utep task start <task_id> or --minutes",
+                    Details = new Dictionary<string, object>
+                    {
+                        ["task_id"] = taskId
+                    },
+                    Remedies = new List<Remedy>
+                    {
+                        new Remedy
+                        {
+                            Id = "R1",
+                            Title = "Start an attempt session",
+                            Commands = new List<string> { $"utep task start {taskId}" }
+                        },
+                        new Remedy
+                        {
+                            Id = "R2",
+                            Title = "Provide minutes explicitly",
+                            Commands = new List<string> { $"utep task attempt {taskId} --minutes 15 --evidence \"...\"" }
+                        }
                     }
                 }
             },
