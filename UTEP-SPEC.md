@@ -21,7 +21,7 @@ UTEP **не является таск-менеджером**.
 1. **Истина в JSON-файлах** (`goal.json`, `*.task.json`, `utep.log.ndjson`).
 2. **CLI — единственный исполнитель правил.**
 3. **Агент и человек не редактируют файлы напрямую.**
-4. **`next` возвращает только выполнимое сейчас (Actionable).**
+4. **`next` возвращает все нетерминальные задачи, требующие работы, с классификацией по типу действия.**
 5. **Любая ошибка валидации должна иметь путь разрешения** (`doctor`).
 6. **Дерево задач — для смысла, зависимости — для порядка.**
 7. **View (`index.md`) генерируется CLI и обновляется автоматически после изменений.**
@@ -178,10 +178,11 @@ CLI вычисляет:
 
 | Состояние           | Смысл                               |
 | ------------------- | ----------------------------------- |
-| Actionable          | Ready + зависимости сняты           |
-| Blocked | Ready, но ждёт блокеры              |
-| Question         | Question с вопросом                  |
-| NotReady            | Draft / Planned                     |
+| Execute             | Ready + зависимости сняты           |
+| Blocked             | Ready, но ждёт блокеры              |
+| Continue            | InProgress                          |
+| Clarify             | Question                            |
+| Plan                | Draft / Planned                     |
 | Terminal            | Completed / Cancelled / Invalidated |
 
 ---
@@ -190,21 +191,19 @@ CLI вычисляет:
 
 **Кандидаты:**
 
-* `status == Ready`
-* зависимости сняты
-* не терминальные
+* все нетерминальные задачи
+* классифицируются по `effective_state`
 
 **Сортировка:**
 
-1. depth ↑
-2. blocks_count ↓
-3. priority ↑
-4. created_at ↑ (если есть) / стабильный tie‑break
+1. `effective_state` в порядке: Continue → Execute → Clarify → Plan → Blocked
+2. depth ↑
+3. blocks_count ↓
+4. priority ↑
+5. task_id ↑ (стабильный tie‑break)
 
 **Если кандидатов нет:**
 
-* `reason == "question"` → агент должен найти вопрос через дерево цели
-* `reason == "blocked"` → агент работает с блокерами
 * `reason == "none"` → остановиться
 * exit code `5`
 

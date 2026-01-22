@@ -48,7 +48,7 @@ public class ValidationServiceTests
     }
 
     [Fact]
-    public void ShouldDetectMissingSuccessCriteriaForActionableStatuses()
+    public void ShouldDetectMissingSuccessCriteriaForExecutionStatuses()
     {
         var task = TestData.CreateTask("T-001", TaskStatus.Ready);
         var snapshot = TestData.CreateSnapshot(task);

@@ -69,7 +69,7 @@ public sealed class RenderService
                 info.File.Task.Id,
                 Computed = _computedBuilder.Build(info.File, tasks, blocksCount)
             })
-            .Where(item => item.Computed.EffectiveState == "Blocked")
+            .Where(item => item.Computed.EffectiveState == EffectiveState.Blocked)
             .Take(5)
             .ToList();
 
@@ -286,7 +286,7 @@ public sealed class RenderService
 
     private static string BuildMarker(TaskComputed computed, TaskData task)
     {
-        if (computed.EffectiveState == "Blocked")
+        if (computed.EffectiveState == EffectiveState.Blocked)
         {
             return $" ⛔ blocked: {string.Join(",", computed.BlockedBy)}";
         }

@@ -5,7 +5,7 @@ namespace UTEP.Cli.Domain;
 public sealed class TaskComputed
 {
     [JsonPropertyOrder(1)]
-    public string EffectiveState { get; set; } = string.Empty;
+    public EffectiveState EffectiveState { get; set; }
 
     [JsonPropertyOrder(2)]
     public bool IsUnblocked { get; set; }
@@ -18,6 +18,16 @@ public sealed class TaskComputed
 
     [JsonPropertyOrder(5)]
     public int BlocksCount { get; set; }
+}
+
+public enum EffectiveState
+{
+    Execute,
+    Blocked,
+    Continue,
+    Clarify,
+    Plan,
+    Terminal
 }
 
 public sealed class TaskRef

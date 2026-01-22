@@ -5,7 +5,7 @@
 1. **Истина в JSON-файлах** (`goal.json`, `*.task.json`, `utep.log.ndjson`).
 2. **View для человека** (`index.md`) генерируется CLI.
 3. **Агент/человек не редактируют файлы вручную** (только CLI).
-4. `utep next` возвращает **только выполнимое сейчас** (`Actionable`).
+4. `utep next` возвращает **все нетерминальные задачи, требующие работы**, с классификацией по типу действия.
 5. Любая валидация должна иметь путь “разрулить”, чтобы работа не встала:
 
    * `utep validate` → сообщает
@@ -168,11 +168,12 @@
   (Cancelled/Invalidated) → значит зависимая задача может требовать переоценки успех-критериев
 * `effective_state`:
 
-  * `Actionable` (Ready + unblocked)
-  * `Blocked` (Ready, но blocked_by не закрыты)
-* `Question` (status Question и есть open_questions)
-  * `Terminal` (Completed/Cancelled/Invalidated)
-  * `NotReady` (Draft/Planned)
+* `Execute` (Ready + unblocked)
+* `Blocked` (Ready, но blocked_by не закрыты)
+* `Continue` (InProgress)
+* `Clarify` (Question)
+* `Plan` (Draft/Planned)
+* `Terminal` (Completed/Cancelled/Invalidated)
 
 **Ключ:** “Blocked” — не статус в файле, а вычисляемый флаг.
 
@@ -180,23 +181,19 @@
 
 # 4) Обновлённые команды CLI
 
-## 4.1 `utep next` — только actionable
+## 4.1 `utep next` — все нетерминальные задачи
 
 ### `utep next [--count N] [--json]`
 
 Возвращает список задач (до N), которые:
 
-* `status == Ready`
 * не терминальные
-* `is_unblocked == true`
+* имеют вычисленное `effective_state`
 
 Если список пуст:
 
 * exit code `5`
-* возвращает `reason` без списка блокеров:
-  * `question` если есть `Question` с вопросами
-  * `blocked` если есть блокировки
-  * `none` если нет ни actionable, ни блокировок
+* возвращает `reason: "none"`
 
 **Пример `--json` ответа, когда пусто:**
 
@@ -204,7 +201,7 @@
 {
   "goal_id": "G-2026-001",
   "actionable": [],
-  "reason": "blocked"
+  "reason": "none"
 }
 ```
 
@@ -297,18 +294,18 @@
 
 # 6) Алгоритм выбора next с зависимостями (строго)
 
-### Кандидаты Actionable:
+### Кандидаты `next`:
 
-* status == Ready
-* is_unblocked == true
-* не терминальные
+* все нетерминальные задачи
+* классифицируются по `effective_state`
 
 Сортировка:
 
-1. depth ↑ (ближе к корню)
-2. `blocks_count` ↓ (делаем то, что открывает больше задач)
-3. priority ↑
-4. created_at ↑
+1. `effective_state` в порядке: Continue → Execute → Clarify → Plan → Blocked
+2. depth ↑ (ближе к корню)
+3. `blocks_count` ↓ (делаем то, что открывает больше задач)
+4. priority ↑
+5. task_id ↑ (стабильный tie-break)
 
 `utep next --count N` возвращает N лучших.
 
@@ -316,25 +313,22 @@
 
 # 7) Обновление runbook агента (только через CLI)
 
-**Ключевое изменение:** агент запрашивает пул и, если пул пуст, переключается на bottlenecks или ждёт ответа пользователя.
+**Ключевое изменение:** агент всегда получает список нетерминальных задач и выбирает тип действия по `effective_state`.
 
 ```markdown
 ## Main loop
 1) `utep next --count 5 --json`
-   - if actionable not empty -> pick first
-   - else:
-       - if reason == "question": run `utep goal tree --json`, find task with `effective_state == "Question"`,
-         then `utep task show <id> --json` and ask the user
-       - if reason == "blocked": run `utep bottlenecks --top 5 --json`,
-         pick the best blocker task (if any is actionable) and work on it
-       - if reason == "none": stop and report
+   - if actionable empty and reason == "none": stop and report
+   - else pick first item
 
 2) `utep task show <id> --json`
-3) Relevance check -> invalidate if needed
-4) `utep task start <id>`
-5) work + `utep task attempt ...`
-6) complete or block with options via CLI
-7) `index.md` обновляется автоматически; при необходимости `utep render` или `utep report`, затем `utep diagnose`
+3) Relevance check -> invalidate/cancel if needed
+4) Choose action by `effective_state`:
+   - Continue/Execute -> `utep task start <id>` (if needed), work + `utep task attempt ...`, then complete if criteria met
+   - Clarify -> `utep task question ...`, ask user, wait for answer, then `utep task answer ...`
+   - Plan -> define title/success_criteria/deps, move to Ready if applicable
+   - Blocked -> work on blockers (e.g., `utep bottlenecks --top 5 --json`)
+5) `index.md` обновляется автоматически; при необходимости `utep render` или `utep report`, затем `utep diagnose`
 ```
 
 ---
@@ -505,7 +499,7 @@ CLI всегда пишет:
 
 ## 1.3 EffectiveState (вычисляемое)
 
-`Actionable|Blocked|Question|Terminal|NotReady`
+`Execute|Blocked|Continue|Clarify|Plan|Terminal`
 
 ## 1.4 TaskComputed (вычисляемые поля)
 
@@ -861,7 +855,7 @@ CLI всегда пишет:
 
 ## 2.15 `utep next [--count N]`
 
-### Если есть actionable
+### Если есть задачи
 
 **result:**
 
@@ -875,7 +869,7 @@ CLI всегда пишет:
         "depth": 1,
         "blocks_count": 6,
         "priority": 2,
-        "rule": "depth, blocks_count, priority, created_at"
+        "rule": "effective_state, depth, blocks_count, priority, task_id"
       }
     }
   ],
@@ -883,14 +877,14 @@ CLI всегда пишет:
 }
 ```
 
-### Если actionable нет
+### Если задач нет
 
 **result:**
 
 ```json
 {
   "actionable": [],
-  "reason": "question"
+  "reason": "none"
 }
 ```
 

@@ -1,10 +1,18 @@
 using UTEP.Cli.Domain;
 using TaskStatus = UTEP.Cli.Domain.TaskStatus;
-
 namespace UTEP.Cli.Services;
 
 public sealed class NextSelector
 {
+    private static readonly IReadOnlyDictionary<EffectiveState, int> EffectiveStateOrder = new Dictionary<EffectiveState, int>
+    {
+        [EffectiveState.Continue] = 0,
+        [EffectiveState.Execute] = 1,
+        [EffectiveState.Clarify] = 2,
+        [EffectiveState.Plan] = 3,
+        [EffectiveState.Blocked] = 4
+    };
+
     public IReadOnlyList<ActionableItem> SelectActionable(
         IReadOnlyDictionary<string, TaskInfo> tasks,
         Dictionary<string, int> depths,
@@ -16,7 +24,7 @@ public sealed class NextSelector
         foreach (var (taskId, info) in tasks)
         {
             var computed = computedBuilder.Build(info.File, tasks, blocksCount);
-            if (computed.EffectiveState != "Actionable")
+            if (computed.EffectiveState == EffectiveState.Terminal)
             {
                 continue;
             }
@@ -41,13 +49,14 @@ public sealed class NextSelector
                     Depth = depth,
                     BlocksCount = computed.BlocksCount,
                     Priority = taskRef.Priority,
-                    Rule = "depth, blocks_count, priority, created_at"
+                    Rule = "effective_state, depth, blocks_count, priority, task_id"
                 }
             });
         }
 
         var ordered = items
-            .OrderBy(item => item.Task.Depth)
+            .OrderBy(item => ResolveEffectiveStateOrder(item.Computed.EffectiveState))
+            .ThenBy(item => item.Task.Depth)
             .ThenByDescending(item => item.Computed.BlocksCount)
             .ThenBy(item => item.Task.Priority)
             .ThenBy(item => item.Task.TaskId, StringComparer.OrdinalIgnoreCase)
@@ -62,15 +71,20 @@ public sealed class NextSelector
         Dictionary<string, int> blocksCount,
         TaskComputedBuilder computedBuilder)
     {
-        var hasQuestion = tasks.Values.Any(info =>
-            info.File.Task.Status == TaskStatus.Question && info.File.Task.OpenQuestions.Count > 0);
-        if (hasQuestion)
+        var hasNonTerminal = tasks.Values.Any(info =>
+            info.File.Task.Status is not TaskStatus.Completed
+                and not TaskStatus.Cancelled
+                and not TaskStatus.Invalidated);
+        if (hasNonTerminal)
         {
-            return "question";
+            return "none";
         }
 
-        var hasBlocked = tasks.Values.Any(info =>
-            computedBuilder.Build(info.File, tasks, blocksCount).EffectiveState == "Blocked");
-        return hasBlocked ? "blocked" : "none";
+        return "none";
+    }
+
+    private static int ResolveEffectiveStateOrder(EffectiveState effectiveState)
+    {
+        return EffectiveStateOrder.TryGetValue(effectiveState, out var order) ? order : int.MaxValue;
     }
 }

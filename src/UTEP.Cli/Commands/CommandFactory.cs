@@ -573,7 +573,7 @@ public sealed class CommandFactory
 
                     var blocksCount = _services.GraphBuilder.BuildBlocksCount(snapshot.Tasks);
                     var computed = _services.ComputedBuilder.Build(info.File, snapshot.Tasks, blocksCount);
-                    if (computed.EffectiveState != "Actionable")
+                    if (computed.EffectiveState != EffectiveState.Execute)
                     {
                         return NotActionable<TaskStartResult>(taskId, computed.BlockedBy);
                     }

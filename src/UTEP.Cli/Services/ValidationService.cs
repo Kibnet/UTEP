@@ -151,7 +151,7 @@ public sealed class ValidationService
                 {
                     Code = "E006",
                     Severity = "error",
-                    Message = $"Missing success_criteria for actionable status. Use: {hint}",
+                    Message = $"Missing success_criteria for execution status. Use: {hint}",
                     Locations = new List<IssueLocation>
                     {
                         new IssueLocation

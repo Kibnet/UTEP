@@ -47,15 +47,16 @@ public sealed class TaskComputedBuilder
         };
     }
 
-    private static string ResolveEffectiveState(TaskStatus status, bool isUnblocked, int openQuestions)
+    private static EffectiveState ResolveEffectiveState(TaskStatus status, bool isUnblocked, int openQuestions)
     {
         return status switch
         {
-            TaskStatus.Ready => isUnblocked ? "Actionable" : "Blocked",
-            TaskStatus.Question => openQuestions > 0 ? "Question" : "Question",
-            TaskStatus.Completed or TaskStatus.Cancelled or TaskStatus.Invalidated => "Terminal",
-            TaskStatus.Draft or TaskStatus.Planned => "NotReady",
-            _ => "NotReady"
+            TaskStatus.Ready => isUnblocked ? EffectiveState.Execute : EffectiveState.Blocked,
+            TaskStatus.InProgress => EffectiveState.Continue,
+            TaskStatus.Question => EffectiveState.Clarify,
+            TaskStatus.Completed or TaskStatus.Cancelled or TaskStatus.Invalidated => EffectiveState.Terminal,
+            TaskStatus.Draft or TaskStatus.Planned => EffectiveState.Plan,
+            _ => EffectiveState.Plan
         };
     }
 }
